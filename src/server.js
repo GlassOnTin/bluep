@@ -2,13 +2,14 @@ const express = require('express');
 const app = express();
 const https = require('https')
 const fs = require('fs');
+const path = require('path');
 
 const PORT = process.env.PORT || 8080;
 
 // SSL/TLS certificate and key
 const options = {
-  key: fs.readFileSync('key.pem'),
-  cert: fs.readFileSync('cert.pem')
+  key: fs.readFileSync('certs/key.pem'),
+  cert: fs.readFileSync('certs/cert.pem')
 };
 
 // Create an HTTPS server
@@ -19,16 +20,19 @@ const io = require('socket.io')(server, {
   maxHttpBufferSize: 1e8 // 100 MB
 });
 
+// Serve static files from the "public" directory
+app.use(express.static(path.join(__dirname, '../public')));
+
+// Serve the index.html file
+app.get('/', (req, res) => {
+  res.sendFile(path.join(__dirname, '../public/index.html'));
+});
+
 // Attach Socket.IO to the HTTPS server
 io.attach(server);
 
 // Store the clipboard content
 let clipboardContent = '';
-
-// Serve the index.html file
-app.get('/', (req, res) => {
-  res.sendFile(__dirname + '/index.html');
-});
 
 // Handle Socket.IO connections
 io.on('connection', (socket) => {

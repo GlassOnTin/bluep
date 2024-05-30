@@ -1,7 +1,7 @@
 <!DOCTYPE html>
 <html>
   <head>
-    <title>Window</title>
+    <title>BlueP</title>
     <script src="https://cdn.socket.io/4.4.1/socket.io.min.js"></script>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/clipboard.js/2.0.10/clipboard.min.js"></script>
     <style>
@@ -14,24 +14,30 @@
       }
 
       #clipboardInput {
+        background-color: #0044FF;
         width: 100%;
         height: calc(100% - 60px);
+        padding: 20px;
         box-sizing: border-box;
         border: none;
         outline: none;
         resize: none;
         font-size: 10px;
-        padding: 20px;
+        color: #FFA;            
       }
+      
+      ::placeholder {
+        color: #AAA;
+      }    
 
       #dropZone {
-        height: 60px;
-        background-color: #f0f0f0;
+        height: 60px;        
+        background-color: #000088;
         display: flex;
         align-items: center;
         justify-content: center;
         font-size: 16px;
-        color: #666;
+        color: #FFA;
       }
     </style>
   </head>
