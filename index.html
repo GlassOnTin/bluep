@@ -1,7 +1,7 @@
 <!DOCTYPE html>
 <html>
   <head>
-    <title>Clipboard Sharing</title>
+    <title>Window</title>
     <script src="https://cdn.socket.io/4.4.1/socket.io.min.js"></script>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/clipboard.js/2.0.10/clipboard.min.js"></script>
     <style>
@@ -15,23 +15,36 @@
 
       #clipboardInput {
         width: 100%;
-        height: 100%;
+        height: calc(100% - 60px);
         box-sizing: border-box;
         border: none;
         outline: none;
         resize: none;
-        font-size: 24px;
+        font-size: 10px;
         padding: 20px;
+      }
+
+      #dropZone {
+        height: 60px;
+        background-color: #f0f0f0;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        font-size: 16px;
+        color: #666;
       }
     </style>
   </head>
   <body>
-    <input type="text" id="clipboardInput" placeholder="Enter text here" />
+    <textarea id="clipboardInput" placeholder="Enter text here"></textarea>
+    <div id="dropZone">Drop file here</div>
     <button id="copyButton" data-clipboard-target="#clipboardInput">Copy</button>
 
     <script>
       // Connect to the Socket.IO server
-      const socket = io();
+      const socket = io('https://' + window.location.hostname + ':' + window.location.port, {
+        maxHttpBufferSize: 1e8 // 100 MB
+      });
 
       // Initialize the Clipboard.js library
       const clipboard = new ClipboardJS('#copyButton');
@@ -45,6 +58,54 @@
       const clipboardInput = document.getElementById('clipboardInput');
       clipboardInput.addEventListener('input', () => {
         socket.emit('updateClipboard', clipboardInput.value);
+      });
+
+      // Handle file drop event
+      const dropZone = document.getElementById('dropZone');
+      
+      dropZone.addEventListener('dragover', (e) => {
+        e.preventDefault();
+        console.log('File dropped');
+        e.dataTransfer.dropEffect = 'copy';
+      });
+
+      dropZone.addEventListener('drop', (e) => {
+        e.preventDefault();
+        console.log('File dropped');
+        const file = e.dataTransfer.files[0];
+        const reader = new FileReader();
+    
+        reader.onload = () => {
+          const fileData = {
+            name: file.name,
+            content: reader.result
+          };
+          console.log('Sending file data:', fileData);
+          socket.emit('fileData', fileData);
+        };
+    
+        reader.onerror = (error) => {
+          console.error('Error reading file:', error);
+        };
+    
+        reader.readAsArrayBuffer(file);
+      });
+    
+      socket.on('fileData', (data) => {
+        console.log('Received fileData event:', data);
+        const blob = new Blob([data.content], { type: 'application/octet-stream' });
+        const link = document.createElement('a');
+        link.download = data.name;
+        link.href = URL.createObjectURL(blob);
+        link.click();
+      });
+
+      socket.on('connect_error', (error) => {
+        console.error('Socket connection error:', error);
+      });
+      
+      socket.on('error', (error) => {
+        console.error('Socket error:', error);
       });
     </script>
   </body>
