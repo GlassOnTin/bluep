@@ -1,27 +1,22 @@
-from fastapi import FastAPI, WebSocket, Depends, HTTPException, security
-from fastapi.security import APIKeyHeader
+from fastapi import FastAPI, WebSocket, HTTPException, Query
 from fastapi.responses import Response, HTMLResponse
 import secrets
 import hmac
 import uvicorn
-from typing import List
+from typing import Set
 import socket
-
 import base64
 from io import BytesIO
 from PIL import Image
-
 import signal
 import asyncio
 
-# Generate secure room keys
-ROOM_KEY = secrets.token_urlsafe(32)
-api_key_header = APIKeyHeader(name="X-Room-Key")
+ROOM_KEY = secrets.token_urlsafe(3)
 
-async def verify_api_key(api_key: str = Depends(api_key_header)):
-    if not hmac.compare_digest(api_key, ROOM_KEY):
+async def verify_key(key: str = Query(None)):
+    if not key or not hmac.compare_digest(key, ROOM_KEY):
         raise HTTPException(status_code=403)
-    return api_key
+    return key
 
 def get_local_ip():
     s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
@@ -35,19 +30,22 @@ def get_local_ip():
     return IP
 
 app = FastAPI()
-connected_clients: List[WebSocket] = []
+connected_clients: Set[WebSocket] = set()
 shared_text = ""
 HOST_IP = get_local_ip()
 blue = "#0000ff"
 
 @app.get("/")
-async def get():
+async def get(key: str = Query(...)):
+    if not hmac.compare_digest(key, ROOM_KEY):
+        raise HTTPException(status_code=403)
+
     html = f"""
     <!DOCTYPE html>
     <html>
     <head>
-        <title>bluep</title>
-        <link rel="icon" type="image/png" href="/favicon.png">
+        <title>bluep (0)</title>
+        <link rel="icon" type="image/png" href="/favicon.png?key={key}">
         <style>
         body, html {{
             margin: 0;
@@ -86,58 +84,20 @@ async def get():
             <textarea style="width: 100%; height: 100%; background-color: {blue}; color: #fff; border: none; outline: none; resize: none;"></textarea>
         </div>
         <script>
-            const ROOM_KEY = "{ROOM_KEY}";  // Exposed only to initial page load
+            const ROOM_KEY = "{key}";
             const editor = document.querySelector('#editor textarea');
-            const ws = new WebSocket("wss://{HOST_IP}:8500/ws");
-
-            ws.onerror = (error) => {{
-                console.error('WebSocket Error:', error);
-            }};
-
-            ws.onclose = (event) => {{
-                console.log('WebSocket Closed:', event.code, event.reason);
-            }};
-
-            ws.onopen = () => {{
-                ws.send(JSON.stringify({{
-                    type: "auth",
-                    key: ROOM_KEY
-                }}));
-                console.log('WebSocket opened');
-            }};
-
-            editor.oninput = () => {{
-                ws.send(JSON.stringify({{
-                    type: "content",
-                    data: editor.value
-                }}));
-                console.log('WebSocket input', editor.value);
-            }};
-
-            let isReceiving = false;
+            const ws = new WebSocket(`wss://{HOST_IP}:8500/ws?key=${{ROOM_KEY}}`);
 
             ws.onmessage = (event) => {{
                 const msg = JSON.parse(event.data);
                 if (msg.type === "content") {{
-                    isReceiving = true;
                     editor.value = msg.data;
-                    isReceiving = false;
-                }} else if (msg.type === "cursor") {{
-                    // Create or update cursor element for this client
-                    let cursor = document.getElementById(`cursor-${{msg.clientId}}`);
-                    if (!cursor) {{
-                        cursor = document.createElement(\'div\');
-                        cursor.id = `cursor-${{msg.clientId}}`;
-                        cursor.style.position = 'absolute';
-                        cursor.style.width = \'3px\';
-                        cursor.style.height = \'20px\';
-                        cursor.style.background = \'#ff0\';
-                        document.body.appendChild(cursor);
-                    }}
-                    cursor.style.left = `${{msg.x}}px`;
-                    cursor.style.top = `${{msg.y}}px`;
-                }}
+                }} else if (msg.type === "clients") {{
+                    document.title = `bluep (${{msg.count}})`;
+                }};
             }};
+
+            let isReceiving = false;
 
             editor.oninput = () => {{
                 if (!isReceiving) {{
@@ -147,23 +107,6 @@ async def get():
                     }}));
                 }}
             }};
-
-            editor.onselectionchange = () => {{
-                const rect = editor.getBoundingClientRect();
-                const pos = editor.selectionStart;
-                // Calculate cursor position based on text position
-                const text = editor.value.substr(0, pos);
-                const lines = text.split("\\n");
-                const lineHeight = 20; // Approximate
-                const y = lines.length * lineHeight;
-                const x = (lines[lines.length-1].length % editor.cols) * 10; // Approximate char width
-
-                ws.send(JSON.stringify({{
-                    type: "cursor",
-                    x: rect.left + x,
-                    y: rect.top + y
-                }}));
-            }};
         </script>
     </body>
     </html>
@@ -171,36 +114,54 @@ async def get():
     return HTMLResponse(html)
 
 @app.websocket("/ws")
-async def websocket_endpoint(websocket: WebSocket):
+async def websocket_endpoint(websocket: WebSocket, key: str = Query(...)):
     global shared_text
+    if not hmac.compare_digest(key, ROOM_KEY):
+        await websocket.close(code=1008)
+        return
+
     await websocket.accept()
     try:
-        auth_msg = await websocket.receive_json()
-        if auth_msg["type"] != "auth" or not hmac.compare_digest(auth_msg["key"], ROOM_KEY):
-            await websocket.close(code=1008)
-            return
+        connected_clients.add(websocket)
+        client_count = len(connected_clients)
+        print(f"Client connected. Total clients: {client_count}")
 
-        connected_clients.append(websocket)
-        print(f"Client connected. Total clients: {len(connected_clients)}")
+        for client in connected_clients:
+            await client.send_json({"type": "clients", "count": client_count})
+
         await websocket.send_json({"type": "content", "data": shared_text})
 
         while True:
             msg = await websocket.receive_json()
             if msg["type"] == "content":
                 shared_text = msg["data"]
-                print(f"Broadcasting message to {len(connected_clients)-1} clients")
                 for client in connected_clients:
                     if client != websocket:
                         await client.send_json({"type": "content", "data": msg["data"]})
+            elif msg["type"] == "cursor":
+                for client in connected_clients:
+                    if client != websocket:
+                        await client.send_json({
+                            "type": "cursor",
+                            "clientId": id(websocket),
+                            "x": msg["x"],
+                            "y": msg["y"]
+                        })
     except Exception as e:
         print(f"Error: {e}")
     finally:
         if websocket in connected_clients:
             connected_clients.remove(websocket)
-            print(f"Client disconnected. Total clients: {len(connected_clients)}")
+            client_count = len(connected_clients)
+            print(f"Client disconnected. Total clients: {client_count}")
+            for client in connected_clients:
+                await client.send_json({"type": "clients", "count": client_count})
 
 @app.get("/favicon.png")
-async def favicon():
+async def favicon(key: str = Query(...)):
+    if not hmac.compare_digest(key, ROOM_KEY):
+        raise HTTPException(status_code=403)
+
     img = Image.new('RGB', (32, 32), blue)
     buffer = BytesIO()
     img.save(buffer, format='PNG')
@@ -220,6 +181,8 @@ signal.signal(signal.SIGINT, handle_shutdown)
 
 if __name__ == "__main__":
     print(f"Server running at https://{HOST_IP}:8500")
+    print(f"Room key: {ROOM_KEY}")
+    print(f"Complete URL: https://{HOST_IP}:8500/?key={ROOM_KEY}")
     config = uvicorn.Config(app, host="0.0.0.0", port=8500, ssl_keyfile="key.pem", ssl_certfile="cert.pem", loop="asyncio", timeout_graceful_shutdown=0)
     server = uvicorn.Server(config=config)
     server.run()
