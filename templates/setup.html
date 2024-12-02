@@ -1,0 +1,48 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>bluep setup</title>
+    <style>
+        body {
+            background: #0000ff;
+            color: white;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            min-height: 100vh;
+            margin: 0;
+            font-family: system-ui, sans-serif;
+        }
+        .qr-container {
+            background: white;
+            padding: 20px;
+            margin: 20px;
+            border-radius: 8px;
+        }
+        .key-info {
+            background: rgba(255, 255, 255, 0.1);
+            padding: 15px;
+            border-radius: 4px;
+            margin: 10px 0;
+            word-break: break-all;
+            max-width: 80vw;
+            text-align: center;
+        }
+    </style>
+</head>
+<body>
+    <h1>Room Setup</h1>
+    <div class="qr-container">
+        <img src="/qr-raw" alt="TOTP QR Code">
+    </div>
+    <div class="key-info">
+        <h3>Secret key:</h3>
+        <p>{{ secret_key }}</p>
+    </div>
+    <div class="key-info">
+        <h3>Current token:</h3>
+        <p>{{ current_token }}</p>
+    </div>
+</body>
+</html>

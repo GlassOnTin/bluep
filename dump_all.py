@@ -2,12 +2,10 @@
 import subprocess
 import os
 
+
 def concat_git_files(output_file="all.txt"):
     # Get tracked files respecting .gitignore
-    files = subprocess.check_output(
-        ["git", "ls-files"],
-        text=True
-    ).splitlines()
+    files = subprocess.check_output(["git", "ls-files"], text=True).splitlines()
 
     # Filter by extension
     extensions = {".py", ".cpp", ".h", ".i", ".txt", ".md", ".html", ".js", ".toml"}
@@ -23,8 +21,8 @@ def concat_git_files(output_file="all.txt"):
             with open(file, "r") as infile:
                 outfile.write(infile.read())
 
-    print()
-    print(f"=> {output_file}")
+    print(f"\n=> {output_file}")
+
 
 if __name__ == "__main__":
     concat_git_files()

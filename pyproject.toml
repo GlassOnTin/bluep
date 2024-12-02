@@ -1,12 +1,14 @@
 [build-system]
-requires = ["hatchling"]
+requires = [
+    "hatchling",
+]
 build-backend = "hatchling.build"
 
 [project]
 name = "bluep"
-version = "0.3.4"
+version = "0.4.0"
 authors = [
-  { name="GlassOnTin", email="63980135+GlassOnTin@users.noreply.github.com" },
+    { name = "GlassOnTin", email = "63980135+GlassOnTin@users.noreply.github.com" },
 ]
 description = "A minimal real-time collaborative text editor"
 readme = "README.md"
@@ -22,17 +24,24 @@ dependencies = [
     "jinja2>=3.1.4",
     "pydantic>=1.10.0",
     "python-multipart>=0.0.6",
-    "cryptography>=44.0.0"
+    "cryptography>=44.0.0",
+    "tomli>=2.2.1",
+    "tomli_w>=1.1.0",
+    "pytest>=7.0.0",
+    "pytest-cov>=4.0.0",
+    "pytest-asyncio>=0.21.0"
 ]
 
 [project.scripts]
 bluep = "bluep.bluep:main"
 
 [tool.hatch.build.targets.wheel]
-packages = ["bluep"]
+packages = [
+    "bluep",
+]
 
 [tool.hatch.build.targets.sdist]
 include = [
     "/bluep",
-    "/templates"
+    "/templates",
 ]
