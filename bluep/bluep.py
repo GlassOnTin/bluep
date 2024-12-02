@@ -146,28 +146,24 @@ class BlueApp:
         return Response(content=img_bytes.getvalue(), media_type="image/png")
 
 
-async def shutdown(signal_type: signal.Signals):
-    """Handle graceful shutdown of the application.
-
-    Args:
-        signal_type: Signal that triggered the shutdown
-    """
+async def shutdown(self, signal_type: signal.Signals) -> None:
+    """Handle graceful shutdown of the application."""
     print(f"\nReceived {signal_type.name}, shutting down...")
     for client in ws_manager.active_connections:
         await client.close()
     sys.exit(0)
 
 
-def main() -> None:
+def main(self) -> None:
     """Entry point for running the application."""
     blue_app = BlueApp()
     loop = asyncio.new_event_loop()
     asyncio.set_event_loop(loop)
 
-    # Setup signal handlers
+    # Setup signal handlers with proper typing
     for sig in (signal.SIGTERM, signal.SIGINT):
         loop.add_signal_handler(
-            sig, lambda s=sig: asyncio.create_task(shutdown(s))  # Type-annotated lambda
+            sig, lambda s=sig: asyncio.create_task(blue_app.shutdown(s))
         )
 
     print()

@@ -10,7 +10,7 @@ import os
 import platform
 import uuid
 from pathlib import Path
-from typing import Optional
+from typing import Optional, Dict
 
 from cryptography.fernet import Fernet
 
@@ -91,13 +91,9 @@ class SecureConfig:
         self.config_path.write_bytes(encrypted)
 
     def load_secret(self) -> Optional[str]:
-        """Load TOTP secret from encrypted configuration.
-
-        Returns:
-            Optional[str]: Stored TOTP secret if found
-        """
+        """Load TOTP secret from encrypted configuration."""
         if not self.config_path.exists():
             return None
         encrypted = self.config_path.read_bytes()
-        config: dict[str, str] = json.loads(self.fernet.decrypt(encrypted))
+        config: Dict[str, str] = json.loads(self.fernet.decrypt(encrypted))
         return config["totp_secret"]

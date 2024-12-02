@@ -4,6 +4,7 @@ This module handles application settings including network configuration,
 SSL certificates, and appearance customization.
 """
 
+from typing import Optional
 import socket
 from pydantic import BaseModel, model_validator
 
@@ -24,7 +25,7 @@ class Settings(BaseModel):
         blue_color: Hex color code for UI theme
     """
 
-    host_ip: str | None = None
+    host_ip: Optional[str] = None
     port: int = 8500
     ssl_keyfile: str = "key.pem"
     ssl_certfile: str = "cert.pem"
