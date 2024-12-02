@@ -5,8 +5,10 @@ from fastapi.testclient import TestClient
 from fastapi.websockets import WebSocket
 from bluep.websocket_manager import WebSocketManager
 
+
 class MockWebSocket:
     """Mock WebSocket for testing"""
+
     def __init__(self):
         self.sent_messages = []
         self.closed = False
@@ -19,6 +21,7 @@ class MockWebSocket:
 
     async def close(self):
         self.closed = True
+
 
 @pytest.mark.asyncio
 async def test_websocket_manager():
@@ -46,7 +49,10 @@ async def test_websocket_manager():
     # ws2 should receive client count and current content
     assert len(ws2.sent_messages) == 2
     assert ws2.sent_messages[0] == {"type": "clients", "count": 2}
-    assert ws2.sent_messages[1] == {"type": "content", "data": "test"}  # Should receive updated content
+    assert ws2.sent_messages[1] == {
+        "type": "content",
+        "data": "test",
+    }  # Should receive updated content
     # ws1 should have received updated client count
     assert ws1.sent_messages[3] == {"type": "clients", "count": 2}
 
@@ -68,6 +74,7 @@ async def test_websocket_manager():
     # Verify final shared text state
     assert manager.shared_text == "test2"
 
+
 @pytest.mark.asyncio
 async def test_websocket_endpoint(client, auth):
     """Test WebSocket endpoint with authentication"""
@@ -84,6 +91,7 @@ async def test_websocket_endpoint(client, auth):
         data = websocket.receive_json()
         assert data["type"] == "content"
         assert "data" in data
+
 
 def test_invalid_websocket_auth(client, auth):
     """Test WebSocket connection with invalid authentication"""

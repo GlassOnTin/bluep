@@ -3,6 +3,7 @@
 This module provides functions for generating self-signed SSL certificates
 for secure HTTPS/WSS communication in development environments.
 """
+
 import datetime
 import os
 import ipaddress

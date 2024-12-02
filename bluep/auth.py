@@ -4,6 +4,7 @@ This module handles TOTP-based authentication, QR code generation, and rate limi
 for the bluep application. It provides secure access control through time-based
 one-time passwords and protects against brute force attempts.
 """
+
 import base64
 import secrets
 import time

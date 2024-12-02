@@ -5,6 +5,7 @@ from bluep.bluep import BlueApp
 from PIL import Image
 from io import BytesIO
 
+
 def test_qr_raw_endpoint(client):
     """Test QR code generation endpoint"""
     response = client.get("/qr-raw")
@@ -15,12 +16,14 @@ def test_qr_raw_endpoint(client):
     img = Image.open(BytesIO(response.content))
     assert img.format == "PNG"
 
+
 def test_setup_page(client):
     """Test TOTP setup page"""
     response = client.get("/setup")
     assert response.status_code == 200
     assert "Room Setup" in response.text
     assert "Secret key:" in response.text
+
 
 def test_favicon_with_auth(client, auth):
     """Test favicon endpoint with authentication"""

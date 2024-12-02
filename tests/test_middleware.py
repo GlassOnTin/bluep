@@ -4,6 +4,7 @@ from fastapi import FastAPI, Request
 from fastapi.testclient import TestClient
 from bluep.middleware import RateLimitMiddleware, configure_security
 
+
 def test_rate_limit_middleware():
     """Test rate limiting middleware"""
     app = FastAPI()
@@ -24,8 +25,10 @@ def test_rate_limit_middleware():
 
     # Test rate limit reset
     import time
+
     time.sleep(1.1)
     assert client.get("/").status_code == 200
+
 
 def test_security_headers():
     """Test security headers middleware"""
@@ -46,13 +49,17 @@ def test_security_headers():
     assert "default-src 'self'" in response.headers["Content-Security-Policy"]
 
     # Test CORS
-    response = client.options("/", headers={
-        "origin": "https://example.com",
-        "access-control-request-method": "GET",
-        "host": "testserver"
-    })
+    response = client.options(
+        "/",
+        headers={
+            "origin": "https://example.com",
+            "access-control-request-method": "GET",
+            "host": "testserver",
+        },
+    )
     assert response.status_code == 200
     assert "access-control-allow-origin" in response.headers
+
 
 def test_rate_limit_per_ip():
     """Test rate limiting tracks different IPs separately"""
@@ -67,22 +74,19 @@ def test_rate_limit_per_ip():
 
     # Test first IP
     for _ in range(2):  # Should succeed
-        response = client.get("/", headers={
-            "X-Forwarded-For": "1.1.1.1",
-            "host": "testserver"
-        })
+        response = client.get(
+            "/", headers={"X-Forwarded-For": "1.1.1.1", "host": "testserver"}
+        )
         assert response.status_code == 200
 
     # Should be rate limited
-    response = client.get("/", headers={
-        "X-Forwarded-For": "1.1.1.1",
-        "host": "testserver"
-    })
+    response = client.get(
+        "/", headers={"X-Forwarded-For": "1.1.1.1", "host": "testserver"}
+    )
     assert response.status_code == 429
 
     # Different IP should still work
-    response = client.get("/", headers={
-        "X-Forwarded-For": "2.2.2.2",
-        "host": "testserver"
-    })
+    response = client.get(
+        "/", headers={"X-Forwarded-For": "2.2.2.2", "host": "testserver"}
+    )
     assert response.status_code == 200

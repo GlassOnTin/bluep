@@ -3,6 +3,7 @@
 This module provides middleware components for the bluep application including
 CORS configuration, trusted hosts, rate limiting, and security headers.
 """
+
 import time
 import json
 from collections import defaultdict
@@ -29,7 +30,7 @@ def configure_security(app: FastAPI) -> None:
 
     app.add_middleware(
         TrustedHostMiddleware,
-        allowed_hosts=["testserver", "*"]  # Allow testserver for tests
+        allowed_hosts=["testserver", "*"],  # Allow testserver for tests
     )
 
     @app.middleware("http")
@@ -72,8 +73,7 @@ class RateLimitMiddleware(BaseHTTPMiddleware):
         # Check rate limit
         if len(self.requests[client_host]) >= self.rate_limit:
             return JSONResponse(
-                status_code=429,
-                content={"detail": "Too many requests"}
+                status_code=429, content={"detail": "Too many requests"}
             )
 
         self.requests[client_host].append(current_time)

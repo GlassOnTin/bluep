@@ -3,9 +3,11 @@
 This module defines the core data structures used for session management and
 websocket communication in the collaborative text editor.
 """
+
 from typing import Optional, Literal
 from pydantic import BaseModel
 from datetime import datetime
+
 
 class SessionData(BaseModel):
     """Data structure for storing session information.
@@ -18,6 +20,7 @@ class SessionData(BaseModel):
         expiry: Timestamp when the session expires
         last_totp_use: The last TOTP code used, to prevent replay attacks
     """
+
     username: str
     expiry: datetime
     last_totp_use: str
@@ -36,6 +39,7 @@ class WebSocketMessage(BaseModel):
         y: Optional cursor y-coordinate
         clientId: Optional client identifier
     """
+
     type: Literal["content", "cursor"]
     data: Optional[str] = None
     x: Optional[int] = None

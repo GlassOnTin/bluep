@@ -3,6 +3,7 @@
 This module handles WebSocket connections, broadcasts, and shared text state
 for the collaborative text editor functionality.
 """
+
 from __future__ import annotations
 import asyncio
 import time
@@ -19,6 +20,7 @@ class ConnectionInfo:
         last_active: Timestamp of last activity
         pending_pings: Count of unanswered ping messages
     """
+
     last_active: float
     pending_pings: int = 0
 

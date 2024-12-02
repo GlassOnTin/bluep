@@ -4,6 +4,7 @@ This package provides a secure real-time collaborative text editor with TOTP
 authentication and a blue theme. It enables multiple users to connect and edit
 text simultaneously through their browsers.
 """
+
 from .auth import TOTPAuth
 from .cert_generator import generate_ssl_certs
 from .config import Settings

@@ -3,10 +3,12 @@
 This module handles application settings including network configuration,
 SSL certificates, and appearance customization.
 """
+
 import socket
 from pydantic import BaseModel, model_validator
 
 from bluep.cert_generator import generate_ssl_certs
+
 
 class Settings(BaseModel):
     """Application settings and configuration.
@@ -21,6 +23,7 @@ class Settings(BaseModel):
         ssl_certfile: Path to SSL certificate file
         blue_color: Hex color code for UI theme
     """
+
     host_ip: str | None = None
     port: int = 8500
     ssl_keyfile: str = "key.pem"

@@ -5,6 +5,7 @@ WebSocket connections, and TOTP authentication for the collaborative text editor
 The editor provides real-time synchronization of text content between multiple
 authenticated users.
 """
+
 import asyncio
 import signal
 import sys
@@ -28,6 +29,7 @@ from .websocket_manager import WebSocketManager
 templates = Jinja2Templates(directory="templates")
 settings = Settings()
 ws_manager = WebSocketManager()
+
 
 class BlueApp:
     """Application context manager for bluep."""
@@ -62,17 +64,10 @@ class BlueApp:
 
     async def login(self, request: Request):
         """Serve the login page."""
-        return templates.TemplateResponse(
-            request,
-            "login.html",
-            {}
-        )
+        return templates.TemplateResponse(request, "login.html", {})
 
     async def get(
-        self,
-        request: Request,
-        response: Response,
-        key: Optional[str] = None
+        self, request: Request, response: Response, key: Optional[str] = None
     ):
         """Handle main page access and authentication.
 
@@ -135,11 +130,7 @@ class BlueApp:
             },
         )
 
-    async def websocket_endpoint(
-        self,
-        websocket: WebSocket,
-        key: str = Query(...)
-    ):
+    async def websocket_endpoint(self, websocket: WebSocket, key: str = Query(...)):
         """Handle WebSocket connections for real-time collaboration.
 
         Args:
@@ -213,10 +204,7 @@ def main():
 
     # Setup signal handlers
     for sig in (signal.SIGTERM, signal.SIGINT):
-        loop.add_signal_handler(
-            sig,
-            lambda s=sig: asyncio.create_task(shutdown(s))
-        )
+        loop.add_signal_handler(sig, lambda s=sig: asyncio.create_task(shutdown(s)))
 
     print(f"Server running at https://{settings.host_ip}:{settings.port}")
     print(f"Setup page: https://{settings.host_ip}:{settings.port}/setup")

@@ -3,6 +3,7 @@
 This module handles user session creation, validation, and cleanup for
 authenticated users of the collaborative editor.
 """
+
 from datetime import datetime, timedelta
 import secrets
 from typing import Dict, Optional
@@ -11,6 +12,7 @@ from fastapi import Response
 from fastapi.security import APIKeyCookie
 
 from bluep.models import SessionData
+
 
 class SessionManager:
     """Manages user sessions with secure cookie-based authentication.

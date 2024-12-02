@@ -3,6 +3,7 @@
 This module handles secure storage and retrieval of configuration data,
 particularly TOTP secrets, using machine-specific encryption.
 """
+
 import base64
 import json
 import os
@@ -75,7 +76,7 @@ class SecureConfig:
         # Linux fallbacks
         for path in ["/etc/machine-id", "/var/lib/dbus/machine-id"]:
             if os.path.exists(path):
-                with open(path, encoding='utf-8') as f:
+                with open(path, encoding="utf-8") as f:
                     return f.read().strip()
         return str(uuid.UUID(int=uuid.getnode()))
 
