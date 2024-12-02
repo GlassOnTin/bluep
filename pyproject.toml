@@ -1,20 +1,25 @@
-[tool.poetry]
-name = "collaborative-editor"
-version = "0.1.0"
-description = "Simple collaborative text editor"
-authors = ["bluepy <bluepy@blue.com>"]
-packages = [{include = "bluep"}]
-
-[tool.poetry.dependencies]
-python = "^3.8"
-fastapi = "^0.109.0"
-uvicorn = "^0.27.0"
-websockets = "^12.0"
-Pillow = "^10.2.0"
-
-[tool.poetry.scripts]
-start = "bluep.main:main"
-
 [build-system]
-requires = ["poetry-core>=1.0.0"]
-build-backend = "poetry.core.masonry.api"
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "bluep"
+version = "0.2.0"
+authors = [
+  { name="GlassOnTin", email="63980135+GlassOnTin@users.noreply.github.com" },
+]
+description = "A minimal real-time collaborative text editor"
+readme = "README.md"
+requires-python = ">=3.7"
+dependencies = [
+    "fastapi>=0.68.0",
+    "uvicorn>=0.15.0",
+    "pillow>=8.0.0",
+    "websockets>=10.0",
+]
+
+[project.scripts]
+bluep = "bluep.bluep:main"
+
+[tool.hatch.build.targets.wheel]
+packages = ["bluep"]
