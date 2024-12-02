@@ -44,17 +44,13 @@ class Settings(BaseModel):
         return self
 
     def _get_local_ip(self) -> str:
-        """Detect local IP address for server binding.
-
-        Returns:
-            str: Local IP address or localhost if detection fails
-        """
+        """Detect local IP address for server binding."""
         s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
         try:
             s.connect(("8.8.8.8", 1))
-            local_ip = s.getsockname()[0]
+            local_ip: str = s.getsockname()[0]
+            return local_ip
         except Exception:
-            local_ip = "127.0.0.1"
+            return "127.0.0.1"
         finally:
             s.close()
-        return local_ip

@@ -32,16 +32,14 @@ ws_manager = WebSocketManager()
 
 
 class BlueApp:
-    """Application context manager for bluep."""
-
-    def __init__(self):
+    def __init__(self) -> None:
         """Initialize the application context."""
         self.app = FastAPI()
         self.auth = TOTPAuth()
         configure_security(self.app)
         self._configure_routes()
 
-    def _configure_routes(self):
+    def _configure_routes(self) -> None:
         """Configure application routes and handlers."""
         self.app.get("/")(self.get)
         self.app.get("/qr-raw")(self.qr_raw)
@@ -50,15 +48,8 @@ class BlueApp:
         self.app.get("/favicon.png")(self.favicon)
         self.app.websocket("/ws")(self.websocket_endpoint)
 
-    async def setup(self, request: Request):
-        """Serve the TOTP setup page.
-
-        Args:
-            request: FastAPI request object
-
-        Returns:
-            TemplateResponse: Rendered setup page
-        """
+    async def setup(self, request: Request) -> Response:
+        """Serve the TOTP setup page."""
         return templates.TemplateResponse(
             "setup.html",
             {
@@ -69,37 +60,73 @@ class BlueApp:
             },
         )
 
-    async def login(self, request: Request):
+    async def login(self, request: Request) -> Response:
         """Serve the login page."""
-        return templates.TemplateResponse(request, "login.html", {})
+        return templates.TemplateResponse("login.html", {"request": request})
 
     async def get(
         self, request: Request, response: Response, key: Optional[str] = None
-    ):
-        """Handle main page access and authentication.
-
-        Args:
-            request: FastAPI request object
-            response: FastAPI response object
-            key: Optional TOTP key for authentication
-
-        Returns:
-            Response: Either editor page or login redirect
-        """
+    ) -> Response:
+        """Handle main page access and authentication."""
         if not key:
             return RedirectResponse(url="/login")
 
         await self.auth.verify_and_create_session(key, request, response)
-
         return templates.TemplateResponse(
-            request,
             "editor.html",
             {
+                "request": request,
                 "host_ip": settings.host_ip,
                 "key": key,
                 "blue": settings.blue_color,
             },
         )
+
+    async def websocket_endpoint(
+        self, websocket: WebSocket, key: str = Query(...)
+    ) -> None:
+        """Handle WebSocket connections for real-time collaboration."""
+        if not self.auth.verify(key):
+            await websocket.close(code=1008)
+            return
+
+        await ws_manager.connect(websocket)
+        try:
+            while True:
+                msg = WebSocketMessage.model_validate_message(
+                    await websocket.receive_text()
+                )
+                if msg.type == "content" and msg.data is not None:
+                    ws_manager.update_shared_text(msg.data)
+                    await ws_manager.broadcast(
+                        msg.model_dump(exclude_none=True), exclude=websocket
+                    )
+                elif msg.type == "cursor":
+                    cursor_data = msg.model_dump(exclude_none=True)
+                    cursor_data["clientId"] = id(websocket)
+                    await ws_manager.broadcast(cursor_data, exclude=websocket)
+        except asyncio.CancelledError:
+            await ws_manager.disconnect(websocket)
+        except Exception as exc:
+            print(f"WebSocket error ({type(exc).__name__}): {exc}")
+            await ws_manager.disconnect(websocket)
+
+    async def shutdown(signal_type: signal.Signals) -> None:
+        """Handle graceful shutdown of the application."""
+        print(f"\nReceived {signal_type.name}, shutting down...")
+        for client in ws_manager.active_connections:
+            await client.close()
+        sys.exit(0)
+
+    async def favicon(self, key: Optional[str] = None) -> Response:
+        """Serve the favicon with authentication check."""
+        if not key or not self.auth.verify(key):
+            raise HTTPException(status_code=403)
+
+        img = Image.new("RGB", (32, 32), settings.blue_color)
+        buffer = BytesIO()
+        img.save(buffer, format="PNG")
+        return Response(content=buffer.getvalue(), media_type="image/png")
 
     async def qr_raw(self) -> Response:
         """Generate and serve the TOTP QR code.
@@ -118,57 +145,6 @@ class BlueApp:
 
         return Response(content=img_bytes.getvalue(), media_type="image/png")
 
-    async def websocket_endpoint(self, websocket: WebSocket, key: str = Query(...)):
-        """Handle WebSocket connections for real-time collaboration.
-
-        Args:
-            websocket: WebSocket connection
-            key: TOTP authentication key
-        """
-        if not self.auth.verify(key):
-            await websocket.close(code=1008)
-            return
-
-        await ws_manager.connect(websocket)
-        try:
-            while True:
-                msg = WebSocketMessage.model_validate_message(
-                    await websocket.receive_text()
-                )
-                if msg.type == "content":
-                    ws_manager.update_shared_text(msg.data)
-                    await ws_manager.broadcast(
-                        msg.model_dump(exclude_none=True), exclude=websocket
-                    )
-                elif msg.type == "cursor":
-                    cursor_data = msg.model_dump(exclude_none=True)
-                    cursor_data["clientId"] = id(websocket)
-                    await ws_manager.broadcast(cursor_data, exclude=websocket)
-        except asyncio.CancelledError:
-            # Handle graceful shutdown
-            await ws_manager.disconnect(websocket)
-        except Exception as exc:
-            # Log specific exception type for debugging
-            print(f"WebSocket error ({type(exc).__name__}): {exc}")
-            await ws_manager.disconnect(websocket)
-
-    async def favicon(self, key: Optional[str] = None):
-        """Serve the favicon with authentication check.
-
-        Args:
-            key: Optional TOTP authentication key
-
-        Returns:
-            Response: PNG image response
-        """
-        if not key or not self.auth.verify(key):
-            raise HTTPException(status_code=403)
-
-        img = Image.new("RGB", (32, 32), settings.blue_color)
-        buffer = BytesIO()
-        img.save(buffer, format="PNG")
-        return Response(content=buffer.getvalue(), media_type="image/png")
-
 
 async def shutdown(signal_type: signal.Signals):
     """Handle graceful shutdown of the application.
@@ -182,17 +158,17 @@ async def shutdown(signal_type: signal.Signals):
     sys.exit(0)
 
 
-def main():
+def main() -> None:
     """Entry point for running the application."""
     blue_app = BlueApp()
-
-    # Create new event loop
     loop = asyncio.new_event_loop()
     asyncio.set_event_loop(loop)
 
     # Setup signal handlers
     for sig in (signal.SIGTERM, signal.SIGINT):
-        loop.add_signal_handler(sig, lambda s=sig: asyncio.create_task(shutdown(s)))
+        loop.add_signal_handler(
+            sig, lambda s=sig: asyncio.create_task(shutdown(s))  # Type-annotated lambda
+        )
 
     print()
     print(f"Setup page: https://{settings.host_ip}:{settings.port}/setup")

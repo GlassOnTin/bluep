@@ -99,5 +99,5 @@ class SecureConfig:
         if not self.config_path.exists():
             return None
         encrypted = self.config_path.read_bytes()
-        config = json.loads(self.fernet.decrypt(encrypted))
+        config: dict[str, str] = json.loads(self.fernet.decrypt(encrypted))
         return config["totp_secret"]
