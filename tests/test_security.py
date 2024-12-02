@@ -15,7 +15,7 @@ def test_secure_config():
 
 
 def test_ssl_cert_generation():
-    from bluep.ssl import generate_ssl_certs
+    from bluep.cert_generator import generate_ssl_certs
 
     with tempfile.TemporaryDirectory() as tmpdir:
         cert_path = Path(tmpdir) / "cert.pem"

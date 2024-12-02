@@ -18,11 +18,11 @@ from PIL import Image
 import qrcode
 import uvicorn
 
-from bluep.auth import TOTPAuth
-from bluep.config import Settings
-from bluep.models import WebSocketMessage
-from bluep.middleware import configure_security
-from bluep.websocket_manager import WebSocketManager
+from .auth import TOTPAuth
+from .config import Settings
+from .models import WebSocketMessage
+from .middleware import configure_security
+from .websocket_manager import WebSocketManager
 
 # Initialize core application components
 templates = Jinja2Templates(directory="templates")
@@ -43,25 +43,59 @@ class BlueApp:
         """Configure application routes and handlers."""
         self.app.get("/qr-raw")(self.qr_raw)
         self.app.get("/setup")(self.setup)
-        self.app.get("/login")(self.login)  # Added login route
+        self.app.get("/login")(self.login)
         self.app.get("/")(self.get)
         self.app.get("/favicon.png")(self.favicon)
         self.app.websocket("/ws")(self.websocket_endpoint)
 
-    # Add the login handler:
+    async def setup(self, request: Request):
+        """Serve the TOTP setup page."""
+        return templates.TemplateResponse(
+            request,
+            "setup.html",
+            {
+                "qr_code": self.auth.qr_base64,
+                "secret_key": self.auth.secret_key,
+                "current_token": self.auth.totp.now(),
+            },
+        )
+
     async def login(self, request: Request):
-        """Serve the login page.
+        """Serve the login page."""
+        return templates.TemplateResponse(
+            request,
+            "login.html",
+            {}
+        )
+
+    async def get(
+        self,
+        request: Request,
+        response: Response,
+        key: Optional[str] = None
+    ):
+        """Handle main page access and authentication.
 
         Args:
             request: FastAPI request object
+            response: FastAPI response object
+            key: Optional TOTP key for authentication
 
         Returns:
-            TemplateResponse: Rendered login page
+            Response: Either editor page or login redirect
         """
+        if not key:
+            return RedirectResponse(url="/login")
+
+        await self.auth.verify_and_create_session(key, request, response)
+
         return templates.TemplateResponse(
-            "login.html",
+            request,
+            "editor.html",
             {
-                "request": request,
+                "host_ip": settings.host_ip,
+                "key": key,
+                "blue": settings.blue_color,
             },
         )
 
@@ -98,37 +132,6 @@ class BlueApp:
                 "qr_code": self.auth.qr_base64,
                 "secret_key": self.auth.secret_key,
                 "current_token": self.auth.totp.now(),
-            },
-        )
-
-    async def get(
-        self,
-        request: Request,
-        response: Response,
-        key: Optional[str] = None
-    ):
-        """Handle main page access and authentication.
-
-        Args:
-            request: FastAPI request object
-            response: FastAPI response object
-            key: Optional TOTP key for authentication
-
-        Returns:
-            Response: Either editor page or login redirect
-        """
-        if not key:
-            return RedirectResponse(url="/login")
-
-        await self.auth.verify_and_create_session(key, request, response)
-
-        return templates.TemplateResponse(
-            "editor.html",
-            {
-                "request": request,
-                "host_ip": settings.host_ip,
-                "key": key,
-                "blue": settings.blue_color,
             },
         )
 
