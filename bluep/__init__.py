@@ -13,7 +13,7 @@ from .secure_config import SecureConfig
 from .session_manager import SessionData
 from .websocket_manager import WebSocketManager
 
-__version__ = "0.4.0"
+__version__ = "0.4.1"
 __all__ = [
     "RateLimitMiddleware",
     "SessionData",

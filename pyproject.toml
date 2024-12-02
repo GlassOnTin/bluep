@@ -6,7 +6,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "bluep"
-version = "0.4.0"
+version = "0.4.1"
 authors = [
     { name = "GlassOnTin", email = "63980135+GlassOnTin@users.noreply.github.com" },
 ]
@@ -30,7 +30,7 @@ dependencies = [
     "pytest>=7.0.0",
     "pytest-cov>=4.0.0",
     "pytest-asyncio>=0.21.0",
-    "httpx>=0.28.0"
+    "httpx>=0.28.0",
 ]
 
 [project.scripts]
