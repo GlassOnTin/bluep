@@ -31,7 +31,7 @@ class TOTPAuth:
 
         self._failed_attempts = {}
         self.max_attempts = 3
-        self.lockout_time = 0  # 5 minutes
+        self.lockout_time = 300  # 5 minutes
 
     def _generate_qr(self) -> str:
         qr = qrcode.QRCode(version=1, box_size=10, border=5)
