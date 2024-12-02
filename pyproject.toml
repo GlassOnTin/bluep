@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "bluep"
-version = "0.2.1"
+version = "0.3.0"
 authors = [
   { name="GlassOnTin", email="63980135+GlassOnTin@users.noreply.github.com" },
 ]
@@ -16,6 +16,12 @@ dependencies = [
     "uvicorn>=0.15.0",
     "pillow>=8.0.0",
     "websockets>=10.0",
+    "pyotp>=2.9.0",
+    "qrcode>=8.0.0",
+    "MarkupSafe>=3.0.2",
+    "jinja2>=3.1.4",
+    "pydantic>=1.10.0",
+    "python-multipart>=0.0.6"
 ]
 
 [project.scripts]
@@ -23,3 +29,9 @@ bluep = "bluep.bluep:main"
 
 [tool.hatch.build.targets.wheel]
 packages = ["bluep"]
+
+[tool.hatch.build.targets.sdist]
+include = [
+    "/bluep",
+    "/templates"
+]

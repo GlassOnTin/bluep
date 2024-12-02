@@ -1,0 +1,69 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>bluep (0)</title>
+    <link rel="icon" type="image/png" href="/favicon.png?key={{key}}">
+    <style>
+        body, html {
+            margin: 0;
+            padding: 8px;
+            height: calc(100vh - 32px);
+            width: calc(100vw - 32px);
+            background: {{blue}};
+            overflow: hidden;
+        }
+        #editor {
+            width: 100%;
+            height: 100%;
+            margin: 0;
+            padding: 16px;
+            background-color: {{blue}};
+            color: #fff;
+            border: 1px solid #ccc;
+            border-radius: 4px;
+            font-size: 16px;
+            resize: none;
+            box-sizing: border-box;
+        }
+        #editor::before {
+            content: "bluep";
+            position: absolute;
+            top: 0.5em;
+            left: 3em;
+            transform: translateX(-50%);
+            background: {{blue}};
+            padding: 0 10px;
+        }
+    </style>
+</head>
+<body>
+    <div id="editor">
+        <textarea style="width: 100%; height: 100%; background-color: {{blue}}; color: #fff; border: none; outline: none; resize: none;" autofocus></textarea>
+    </div>
+    <script>
+        const ROOM_KEY = "{{key}}";
+        const editor = document.querySelector('#editor textarea');
+        const ws = new WebSocket(`wss://{{host_ip}}:8500/ws?key=${ROOM_KEY}`);
+
+        ws.onmessage = (event) => {
+            const msg = JSON.parse(event.data);
+            if (msg.type === "content") {
+                editor.value = msg.data;
+            } else if (msg.type === "clients") {
+                document.title = `bluep (${msg.count})`;
+            }
+        };
+
+        let isReceiving = false;
+
+        editor.oninput = () => {
+            if (!isReceiving) {
+                ws.send(JSON.stringify({
+                    type: "content",
+                    data: editor.value
+                }));
+            }
+        };
+    </script>
+</body>
+</html>
