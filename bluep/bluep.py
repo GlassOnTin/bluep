@@ -43,19 +43,26 @@ class BlueApp:
 
     def _configure_routes(self):
         """Configure application routes and handlers."""
+        self.app.get("/")(self.get)
         self.app.get("/qr-raw")(self.qr_raw)
         self.app.get("/setup")(self.setup)
         self.app.get("/login")(self.login)
-        self.app.get("/")(self.get)
         self.app.get("/favicon.png")(self.favicon)
         self.app.websocket("/ws")(self.websocket_endpoint)
 
     async def setup(self, request: Request):
-        """Serve the TOTP setup page."""
+        """Serve the TOTP setup page.
+
+        Args:
+            request: FastAPI request object
+
+        Returns:
+            TemplateResponse: Rendered setup page
+        """
         return templates.TemplateResponse(
-            request,
             "setup.html",
             {
+                "request": request,
                 "qr_code": self.auth.qr_base64,
                 "secret_key": self.auth.secret_key,
                 "current_token": self.auth.totp.now(),
@@ -110,25 +117,6 @@ class BlueApp:
         img_bytes.seek(0)
 
         return Response(content=img_bytes.getvalue(), media_type="image/png")
-
-    async def setup(self, request: Request):
-        """Serve the TOTP setup page.
-
-        Args:
-            request: FastAPI request object
-
-        Returns:
-            TemplateResponse: Rendered setup page
-        """
-        return templates.TemplateResponse(
-            "setup.html",
-            {
-                "request": request,
-                "qr_code": self.auth.qr_base64,
-                "secret_key": self.auth.secret_key,
-                "current_token": self.auth.totp.now(),
-            },
-        )
 
     async def websocket_endpoint(self, websocket: WebSocket, key: str = Query(...)):
         """Handle WebSocket connections for real-time collaboration.
@@ -206,8 +194,12 @@ def main():
     for sig in (signal.SIGTERM, signal.SIGINT):
         loop.add_signal_handler(sig, lambda s=sig: asyncio.create_task(shutdown(s)))
 
-    print(f"Server running at https://{settings.host_ip}:{settings.port}")
+    print()
     print(f"Setup page: https://{settings.host_ip}:{settings.port}/setup")
+    print()
+    print(f"Server running at https://{settings.host_ip}:{settings.port}")
+    print()
+
 
     config = uvicorn.Config(
         blue_app.app,

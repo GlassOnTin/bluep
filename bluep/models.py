@@ -5,7 +5,7 @@ websocket communication in the collaborative text editor.
 """
 
 from typing import Optional, Literal
-from pydantic import BaseModel
+from pydantic import BaseModel, field_validator
 from datetime import datetime
 
 
@@ -45,6 +45,12 @@ class WebSocketMessage(BaseModel):
     x: Optional[int] = None
     y: Optional[int] = None
     clientId: Optional[int] = None
+
+    @field_validator("data")
+    def validate_data(cls, v: Optional[str], values: dict) -> str:
+        if values.get("type") == "content" and v is None:
+            return ""  # Default to empty string for content messages
+        return v or ""  # Ensure we always return a string
 
     @classmethod
     def model_validate_message(cls, data: str) -> "WebSocketMessage":
