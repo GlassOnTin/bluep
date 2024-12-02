@@ -5,7 +5,7 @@ from .secure_config import SecureConfig
 from .session_manager import SessionData, SessionManager
 from .websocket_manager import WebSocketManager
 
-__version__ = "0.3.3"
+__version__ = "0.3.4"
 
 __all__ = [
     'TOTPAuth',
