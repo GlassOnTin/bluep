@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "bluep"
-version = "0.3.1"
+version = "0.3.3"
 authors = [
   { name="GlassOnTin", email="63980135+GlassOnTin@users.noreply.github.com" },
 ]
@@ -21,7 +21,8 @@ dependencies = [
     "MarkupSafe>=3.0.2",
     "jinja2>=3.1.4",
     "pydantic>=1.10.0",
-    "python-multipart>=0.0.6"
+    "python-multipart>=0.0.6",
+    "cryptography>=44.0.0"
 ]
 
 [project.scripts]

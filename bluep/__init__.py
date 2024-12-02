@@ -1,14 +1,19 @@
 from .auth import TOTPAuth, SessionManager
 from .config import Settings
-from .websocket_manager import WebSocketManager
 from .models import WebSocketMessage
+from .secure_config import SecureConfig
+from .session_manager import SessionData, SessionManager
+from .websocket_manager import WebSocketManager
 
-__version__ = "0.3.0"
+__version__ = "0.3.3"
 
 __all__ = [
     'TOTPAuth',
+    'SessionData',
     'SessionManager',
     'Settings',
+    'SecureConfig',
+    'SessionManager',
     'WebSocketManager',
     'WebSocketMessage'
 ]
