@@ -1,0 +1,20 @@
+[tool.poetry]
+name = "collaborative-editor"
+version = "0.1.0"
+description = "Simple collaborative text editor"
+authors = ["bluepy <bluepy@blue.com>"]
+packages = [{include = "bluep"}]
+
+[tool.poetry.dependencies]
+python = "^3.8"
+fastapi = "^0.109.0"
+uvicorn = "^0.27.0"
+websockets = "^12.0"
+Pillow = "^10.2.0"
+
+[tool.poetry.scripts]
+start = "bluep.main:main"
+
+[build-system]
+requires = ["poetry-core>=1.0.0"]
+build-backend = "poetry.core.masonry.api"
