@@ -1,5 +1,8 @@
-from fastapi import FastAPI, WebSocket
+from fastapi import FastAPI, WebSocket, Depends, HTTPException, security
+from fastapi.security import APIKeyHeader
 from fastapi.responses import Response, HTMLResponse
+import secrets
+import hmac
 import uvicorn
 from typing import List
 import socket
@@ -11,17 +14,14 @@ from PIL import Image
 import signal
 import asyncio
 
-async def shutdown():
-    print("\nClosing connections...")
-    for client in connected_clients:
-        await client.close()
-    exit(0)
+# Generate secure room keys
+ROOM_KEY = secrets.token_urlsafe(32)
+api_key_header = APIKeyHeader(name="X-Room-Key")
 
-def handle_shutdown(signum, frame):
-    loop = asyncio.get_event_loop()
-    loop.create_task(shutdown())
-
-signal.signal(signal.SIGINT, handle_shutdown)
+async def verify_api_key(api_key: str = Depends(api_key_header)):
+    if not hmac.compare_digest(api_key, ROOM_KEY):
+        raise HTTPException(status_code=403)
+    return api_key
 
 def get_local_ip():
     s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
@@ -86,15 +86,83 @@ async def get():
             <textarea style="width: 100%; height: 100%; background-color: {blue}; color: #fff; border: none; outline: none; resize: none;"></textarea>
         </div>
         <script>
-            const ws = new WebSocket("wss://{HOST_IP}:8500/ws");
+            const ROOM_KEY = "{ROOM_KEY}";  // Exposed only to initial page load
             const editor = document.querySelector('#editor textarea');
+            const ws = new WebSocket("wss://{HOST_IP}:8500/ws");
 
-            editor.oninput = () => {{
-                ws.send(editor.value);
+            ws.onerror = (error) => {{
+                console.error('WebSocket Error:', error);
             }};
 
+            ws.onclose = (event) => {{
+                console.log('WebSocket Closed:', event.code, event.reason);
+            }};
+
+            ws.onopen = () => {{
+                ws.send(JSON.stringify({{
+                    type: "auth",
+                    key: ROOM_KEY
+                }}));
+                console.log('WebSocket opened');
+            }};
+
+            editor.oninput = () => {{
+                ws.send(JSON.stringify({{
+                    type: "content",
+                    data: editor.value
+                }}));
+                console.log('WebSocket input', editor.value);
+            }};
+
+            let isReceiving = false;
+
             ws.onmessage = (event) => {{
-                editor.value = event.data;
+                const msg = JSON.parse(event.data);
+                if (msg.type === "content") {{
+                    isReceiving = true;
+                    editor.value = msg.data;
+                    isReceiving = false;
+                }} else if (msg.type === "cursor") {{
+                    // Create or update cursor element for this client
+                    let cursor = document.getElementById(`cursor-${{msg.clientId}}`);
+                    if (!cursor) {{
+                        cursor = document.createElement(\'div\');
+                        cursor.id = `cursor-${{msg.clientId}}`;
+                        cursor.style.position = 'absolute';
+                        cursor.style.width = \'3px\';
+                        cursor.style.height = \'20px\';
+                        cursor.style.background = \'#ff0\';
+                        document.body.appendChild(cursor);
+                    }}
+                    cursor.style.left = `${{msg.x}}px`;
+                    cursor.style.top = `${{msg.y}}px`;
+                }}
+            }};
+
+            editor.oninput = () => {{
+                if (!isReceiving) {{
+                    ws.send(JSON.stringify({{
+                        type: "content",
+                        data: editor.value
+                    }}));
+                }}
+            }};
+
+            editor.onselectionchange = () => {{
+                const rect = editor.getBoundingClientRect();
+                const pos = editor.selectionStart;
+                // Calculate cursor position based on text position
+                const text = editor.value.substr(0, pos);
+                const lines = text.split("\\n");
+                const lineHeight = 20; // Approximate
+                const y = lines.length * lineHeight;
+                const x = (lines[lines.length-1].length % editor.cols) * 10; // Approximate char width
+
+                ws.send(JSON.stringify({{
+                    type: "cursor",
+                    x: rect.left + x,
+                    y: rect.top + y
+                }}));
             }};
         </script>
     </body>
@@ -106,18 +174,30 @@ async def get():
 async def websocket_endpoint(websocket: WebSocket):
     global shared_text
     await websocket.accept()
-    connected_clients.append(websocket)
     try:
-        await websocket.send_text(shared_text)
-        while True:
-            data = await websocket.receive_text()
-            shared_text = data
-            for client in connected_clients:
-                if client != websocket:
-                    await client.send_text(data)
-    except:
-        connected_clients.remove(websocket)
+        auth_msg = await websocket.receive_json()
+        if auth_msg["type"] != "auth" or not hmac.compare_digest(auth_msg["key"], ROOM_KEY):
+            await websocket.close(code=1008)
+            return
 
+        connected_clients.append(websocket)
+        print(f"Client connected. Total clients: {len(connected_clients)}")
+        await websocket.send_json({"type": "content", "data": shared_text})
+
+        while True:
+            msg = await websocket.receive_json()
+            if msg["type"] == "content":
+                shared_text = msg["data"]
+                print(f"Broadcasting message to {len(connected_clients)-1} clients")
+                for client in connected_clients:
+                    if client != websocket:
+                        await client.send_json({"type": "content", "data": msg["data"]})
+    except Exception as e:
+        print(f"Error: {e}")
+    finally:
+        if websocket in connected_clients:
+            connected_clients.remove(websocket)
+            print(f"Client disconnected. Total clients: {len(connected_clients)}")
 
 @app.get("/favicon.png")
 async def favicon():
@@ -125,6 +205,18 @@ async def favicon():
     buffer = BytesIO()
     img.save(buffer, format='PNG')
     return Response(content=buffer.getvalue(), media_type='image/png')
+
+async def shutdown():
+    print("\nClosing connections...")
+    for client in connected_clients:
+        await client.close()
+    exit(0)
+
+def handle_shutdown(signum, frame):
+    loop = asyncio.get_event_loop()
+    loop.create_task(shutdown())
+
+signal.signal(signal.SIGINT, handle_shutdown)
 
 if __name__ == "__main__":
     print(f"Server running at https://{HOST_IP}:8500")
