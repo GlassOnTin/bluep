@@ -200,7 +200,6 @@ def main():
     print(f"Server running at https://{settings.host_ip}:{settings.port}")
     print()
 
-
     config = uvicorn.Config(
         blue_app.app,
         host="0.0.0.0",

@@ -5,6 +5,7 @@ import tempfile
 from bluep.secure_config import SecureConfig
 from bluep.cert_generator import generate_ssl_certs
 
+
 def test_secure_config():
     """Test secure configuration storage and retrieval"""
     with tempfile.TemporaryDirectory() as tmpdir:
@@ -17,6 +18,7 @@ def test_secure_config():
         # Test loading non-existent config
         empty_config = SecureConfig(Path(tmpdir) / "nonexistent.enc")
         assert empty_config.load_secret() is None
+
 
 def test_ssl_cert_generation():
     """Test SSL certificate generation"""

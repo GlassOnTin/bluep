@@ -4,6 +4,7 @@ from fastapi import Response
 import time
 from bluep.session_manager import SessionManager
 
+
 def test_session_creation():
     """Test session creation and cookie setting"""
     manager = SessionManager()
@@ -14,11 +15,12 @@ def test_session_creation():
     assert manager.sessions[session_id].username == "test_user"
     assert isinstance(manager.sessions[session_id].expiry, datetime)
 
-    cookie_header = response.headers.get('set-cookie')
+    cookie_header = response.headers.get("set-cookie")
     assert cookie_header is not None
     assert session_id in cookie_header
-    assert 'HttpOnly' in cookie_header
-    assert 'Secure' in cookie_header
+    assert "HttpOnly" in cookie_header
+    assert "Secure" in cookie_header
+
 
 def test_session_expiry():
     """Test session expiration handling"""
@@ -33,6 +35,7 @@ def test_session_expiry():
     time.sleep(2)
     assert manager.get_session(session_id) is None
     assert session_id not in manager.sessions
+
 
 def test_session_totp_validation():
     """Test TOTP code reuse prevention"""
