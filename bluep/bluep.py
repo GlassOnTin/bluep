@@ -146,44 +146,44 @@ class BlueApp:
         return Response(content=img_bytes.getvalue(), media_type="image/png")
 
 
-async def shutdown(self, signal_type: signal.Signals) -> None:
-    """Handle graceful shutdown of the application."""
-    print(f"\nReceived {signal_type.name}, shutting down...")
-    for client in ws_manager.active_connections:
-        await client.close()
-    sys.exit(0)
+    async def shutdown(self, signal_type: signal.Signals) -> None:
+        """Handle graceful shutdown of the application."""
+        print(f"\nReceived {signal_type.name}, shutting down...")
+        for client in ws_manager.active_connections:
+            await client.close()
+        sys.exit(0)
 
 
-def main(self) -> None:
-    """Entry point for running the application."""
-    blue_app = BlueApp()
-    loop = asyncio.new_event_loop()
-    asyncio.set_event_loop(loop)
+    def main(self) -> None:
+        """Entry point for running the application."""
+        loop = asyncio.new_event_loop()
+        asyncio.set_event_loop(loop)
 
-    # Setup signal handlers with proper typing
-    for sig in (signal.SIGTERM, signal.SIGINT):
-        loop.add_signal_handler(
-            sig, lambda s=sig: asyncio.create_task(blue_app.shutdown(s))
+        # Setup signal handlers with proper typing
+        for sig in (signal.SIGTERM, signal.SIGINT):
+            loop.add_signal_handler(
+                sig, lambda s=sig: asyncio.create_task(blue_app.shutdown(s))
+            )
+
+        print()
+        print(f"Setup page: https://{settings.host_ip}:{settings.port}/setup")
+        print()
+        print(f"Server running at https://{settings.host_ip}:{settings.port}")
+        print()
+
+        config = uvicorn.Config(
+            blue_app.app,
+            host="0.0.0.0",
+            port=settings.port,
+            ssl_keyfile=settings.ssl_keyfile,
+            ssl_certfile=settings.ssl_certfile,
+            loop="asyncio",
+            timeout_graceful_shutdown=0,
         )
-
-    print()
-    print(f"Setup page: https://{settings.host_ip}:{settings.port}/setup")
-    print()
-    print(f"Server running at https://{settings.host_ip}:{settings.port}")
-    print()
-
-    config = uvicorn.Config(
-        blue_app.app,
-        host="0.0.0.0",
-        port=settings.port,
-        ssl_keyfile=settings.ssl_keyfile,
-        ssl_certfile=settings.ssl_certfile,
-        loop="asyncio",
-        timeout_graceful_shutdown=0,
-    )
-    server = uvicorn.Server(config=config)
-    server.run()
+        server = uvicorn.Server(config=config)
+        server.run()
 
 
 if __name__ == "__main__":
-    main()
+    blue_app = BlueApp()
+    blue_app.main()
