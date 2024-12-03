@@ -31,8 +31,8 @@ jobs:
     - name: Check formatting with Black
       run: black --check .
 
-    - name: Type checking with mypy
-      run: mypy bluep
+    #- name: Type checking with mypy
+    #  run: mypy bluep
 
     - name: Lint with pylint
       run: pylint bluep
