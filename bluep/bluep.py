@@ -5,16 +5,17 @@ WebSocket connections, and TOTP authentication for the collaborative text editor
 The editor provides real-time synchronization of text content between multiple
 authenticated users.
 """
-
+import logging
 import asyncio
 import signal
 import sys
 from io import BytesIO
 from typing import Optional
 
-from fastapi import FastAPI, Query, WebSocket, Request, HTTPException
+from fastapi import FastAPI, Query, WebSocket, Request, HTTPException, WebSocketDisconnect
 from fastapi.responses import Response, RedirectResponse
 from fastapi.templating import Jinja2Templates
+
 from PIL import Image
 import qrcode
 import uvicorn
@@ -26,6 +27,7 @@ from .middleware import configure_security
 from .websocket_manager import WebSocketManager
 
 # Initialize core application components
+logger = logging.getLogger(__name__)
 templates = Jinja2Templates(directory="templates")
 settings = Settings()
 ws_manager = WebSocketManager()
@@ -74,54 +76,105 @@ class BlueApp:
         if not key:
             return RedirectResponse(url="/login")
 
-        # Verify and create/refresh session
-        session_id = await self.auth.verify_and_create_session(key, request, response)
-
-        # Refresh session on subsequent requests
-        if session_id:
-            self.auth.session_manager.refresh_session(session_id, response)
-
-        return templates.TemplateResponse(
-            "editor.html",
-            {
-                "request": request,
-                "host_ip": settings.host_ip,
-                "key": key,
-                "blue": settings.blue_color,
-            },
-        )
-
-    async def websocket_endpoint(self, websocket: WebSocket, key: str = Query(...)) -> None:
-        """Handle WebSocket connections for real-time collaboration."""
-        if not self.auth.verify(key):
-            await websocket.close(code=1008)
-            return
-
-        await ws_manager.connect(websocket)
         try:
-            while True:
-                raw_msg = await websocket.receive_text()
+            print("Headers before auth:", request.headers)
+            print("Cookies before auth:", request.cookies)
 
-                # Handle pong messages
-                if raw_msg == '{"type": "pong"}':
-                    await ws_manager.handle_pong(websocket)
-                    continue
+            # Verify and create/refresh session
+            await self.auth.verify_and_create_session(key, request, response)
 
-                # Handle regular messages
-                msg = WebSocketMessage.model_validate_message(raw_msg)
-                if msg.type == "content" and msg.data is not None:
-                    ws_manager.update_shared_text(msg.data)
-                    await ws_manager.broadcast(msg.model_dump(exclude_none=True), exclude=websocket)
-                elif msg.type == "cursor":
-                    cursor_data = msg.model_dump(exclude_none=True)
-                    cursor_data["clientId"] = id(websocket)
-                    await ws_manager.broadcast(cursor_data, exclude=websocket)
+            print("Response cookies being set:", response.headers.get("set-cookie"))
 
-        except WebSocketDisconnect:
-            await ws_manager.disconnect(websocket)
-        except Exception as exc:
-            logger.error(f"WebSocket error ({type(exc).__name__}): {exc}")
-            await ws_manager.disconnect(websocket)
+            # Render editor if authentication successful
+            return templates.TemplateResponse(
+                "editor.html",
+                {
+                    "request": request,
+                    "host_ip": settings.host_ip,
+                    "key": key,
+                    "blue": settings.blue_color,
+                },
+            )
+        except HTTPException:
+            # Redirect to login on invalid TOTP
+            return RedirectResponse(url="/login")
+
+    async def websocket_endpoint(self, websocket: WebSocket) -> None:
+        """Handle WebSocket connections for real-time collaboration."""
+        try:
+            print("WebSocket request received")
+
+            # Parse key from query parameters
+            key = None
+            for param in websocket.url.query.split('&'):
+                if param.startswith('key='):
+                    key = param.split('=')[1]
+                    break
+
+            if not key:
+                print("No key provided")
+                await websocket.close(code=1008)
+                return
+
+            # Get session cookie from WebSocket request
+            cookie = websocket.cookies.get(self.auth.session_manager.cookie_name)
+
+            # If no session exists but we have a valid key, create a new session
+            if not cookie:
+                print("No session found, validating key")
+                try:
+                    # Create a dummy response to store the cookie
+                    response = Response()
+                    await self.auth.verify_and_create_session(key, websocket, response)
+                    cookie = response.headers.get("set-cookie").split(";")[0].split("=")[1]
+                    print(f"Created new session with cookie: {cookie[:8]}...")
+                except Exception as e:
+                    print(f"Failed to create session: {e}")
+                    await websocket.close(code=1008)
+                    return
+
+            # Validate session
+            session = self.auth.session_manager.get_session(cookie)
+            if not session:
+                print("Invalid or expired session")
+                await websocket.close(code=1008)
+                return
+
+            await ws_manager.connect(websocket)
+            print(f"WebSocket connected and initialized with session {cookie[:8]}...")
+
+            try:
+                while True:
+                    raw_msg = await websocket.receive_text()
+
+                    # Handle pong messages without validation
+                    if raw_msg == '{"type": "pong"}':
+                        await ws_manager.handle_pong(websocket)
+                        continue
+
+                    # Handle regular messages
+                    msg = WebSocketMessage.model_validate_message(raw_msg)
+                    if msg.type == "content" and msg.data is not None:
+                        ws_manager.update_shared_text(msg.data)
+                        await ws_manager.broadcast(msg.model_dump(exclude_none=True), exclude=websocket)
+                    elif msg.type == "cursor":
+                        cursor_data = msg.model_dump(exclude_none=True)
+                        cursor_data["clientId"] = id(websocket)
+                        await ws_manager.broadcast(cursor_data, exclude=websocket)
+
+            except WebSocketDisconnect:
+                print("WebSocket disconnected normally")
+                await ws_manager.disconnect(websocket)
+            except Exception as exc:
+                print(f"WebSocket error: {exc}")
+                await ws_manager.disconnect(websocket)
+
+        except Exception as e:
+            print(f"WebSocket connection error: {e}")
+            try:
+                await websocket.close(code=1008)
+            except Exception:
+                pass  # Already closed
 
     async def shutdown(signal_type: signal.Signals) -> None:
         """Handle graceful shutdown of the application."""

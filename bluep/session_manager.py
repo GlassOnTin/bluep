@@ -96,7 +96,8 @@ class SessionManager:
             del self.sessions[session_id]
             return None
 
-        # Refresh session if response object is provided
+        # Only refresh if we have a response object (HTTP requests)
+        # WebSocket connections don't need to refresh cookies
         if response:
             self.refresh_session(session_id, response)
 

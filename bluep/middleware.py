@@ -18,20 +18,21 @@ from starlette.responses import JSONResponse, Response
 
 def configure_security(app: FastAPI) -> None:
     """Configure security middleware for the application."""
-    app.add_middleware(RateLimitMiddleware, rate_limit=100, window=60)
-
     app.add_middleware(
         CORSMiddleware,
         allow_origins=["*"],
-        allow_credentials=True,
+        allow_credentials=True,  # Enable credentials
         allow_methods=["*"],
         allow_headers=["*"],
+        expose_headers=["*"]
     )
 
     app.add_middleware(
         TrustedHostMiddleware,
-        allowed_hosts=["testserver", "*"],  # Allow testserver for tests
+        allowed_hosts=["*"]
     )
+
+    app.add_middleware(RateLimitMiddleware, rate_limit=100, window=60)
 
     @app.middleware("http")
     async def add_security_headers(request: Request, call_next: Callable) -> Response:

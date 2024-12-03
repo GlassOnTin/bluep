@@ -24,6 +24,7 @@
             font-size: 16px;
             resize: none;
             box-sizing: border-box;
+            position: relative;
         }
         #editor::before {
             content: "bluep";
@@ -33,37 +34,135 @@
             transform: translateX(-50%);
             background: {{blue}};
             padding: 0 10px;
+            color: #fff;
+        }
+        #editor textarea {
+            width: 100%;
+            height: 100%;
+            background-color: {{blue}};
+            color: #fff;
+            border: none;
+            outline: none;
+            resize: none;
+            font-size: 16px;
+            font-family: monospace;
+            padding: 16px;
+            box-sizing: border-box;
         }
     </style>
 </head>
 <body>
     <div id="editor">
-        <textarea style="width: 100%; height: 100%; background-color: {{blue}}; color: #fff; border: none; outline: none; resize: none;" autofocus></textarea>
+        <textarea autofocus></textarea>
     </div>
     <script>
-        const ROOM_KEY = "{{key}}";
-        const editor = document.querySelector('#editor textarea');
-        const ws = new WebSocket(`wss://{{host_ip}}:8500/ws?key=${ROOM_KEY}`);
+        // Create WebSocket with auth key
+        const wsUrl = `wss://${window.location.host}/ws?key={{key}}`;
+        let ws = new WebSocket(wsUrl);
 
+        // Track connection state
+        let isConnected = false;
+        let reconnectAttempts = 0;
+        const MAX_RECONNECT_ATTEMPTS = 5;
+        const editor = document.querySelector('#editor textarea');
+        let isReceiving = false;
+
+        ws.onopen = () => {
+            isConnected = true;
+            reconnectAttempts = 0;
+            console.log('Connected to server');
+
+            // Send initial message
+            ws.send(JSON.stringify({
+                type: "content",
+                data: "bluep"
+            }));
+
+        };
+
+        ws.onclose = (event) => {
+            console.log('WebSocket closed:', event.code, event.reason);
+            isConnected = false;
+            handleDisconnect();
+        };
+
+        ws.onerror = (error) => {
+            console.error('WebSocket error:', error);
+        };
+
+        // Add message handler
         ws.onmessage = (event) => {
+            console.log('Received message:', event.data);
             const msg = JSON.parse(event.data);
-            if (msg.type === "content") {
-                editor.value = msg.data;
+            if (msg.type === "ping") {
+                console.log('Received ping, sending pong');
+                ws.send(JSON.stringify({type: "pong"}));
+            } else if (msg.type === "content") {
+                isReceiving = true;
+                const currentValue = editor.value;
+                if (currentValue !== msg.data) {
+                    editor.value = msg.data;
+                }
+                isReceiving = false;
             } else if (msg.type === "clients") {
+                console.log('Updating client count:', msg.count);
                 document.title = `bluep (${msg.count})`;
             }
         };
 
-        let isReceiving = false;
-
         editor.oninput = () => {
-            if (!isReceiving) {
+            if (!isReceiving && isConnected) {
+                const content = editor.value;
                 ws.send(JSON.stringify({
                     type: "content",
-                    data: editor.value
+                    data: content
                 }));
             }
         };
+
+        function handleDisconnect() {
+            console.log('Handling disconnect, attempt:', reconnectAttempts);
+            if (reconnectAttempts < MAX_RECONNECT_ATTEMPTS) {
+                reconnectAttempts++;
+                setTimeout(() => {
+                    console.log('Attempting reconnection...');
+                    window.location.reload();
+                }, 1000 * reconnectAttempts);
+            } else {
+                alert('Connection lost. Please refresh the page.');
+            }
+        }
+
+        // Activity monitoring
+        document.addEventListener('mousemove', () => lastActivity = Date.now());
+        document.addEventListener('keypress', () => lastActivity = Date.now());
+
+        function checkActivity() {
+            if (Date.now() - lastActivity > ACTIVITY_TIMEOUT) {
+                window.location.reload(); // Refresh page if inactive
+            }
+        }
+
+        function handleDisconnect() {
+            console.log('Handling disconnect, attempt:', reconnectAttempts);
+            if (reconnectAttempts < MAX_RECONNECT_ATTEMPTS) {
+                reconnectAttempts++;
+                setTimeout(() => {
+                    console.log('Attempting reconnection...');
+                    const newWs = new WebSocket(wsUrl);
+                    newWs.onopen = ws.onopen;
+                    newWs.onclose = ws.onclose;
+                    newWs.onmessage = ws.onmessage;
+                    newWs.onerror = ws.onerror;
+                    ws = newWs;
+                }, 1000 * reconnectAttempts);
+            } else {
+                alert('Connection lost. Please refresh the page.');
+            }
+        }
+
+        // Regular checks
+        setInterval(checkActivity, 60000); // Check activity every minute
     </script>
 </body>
 </html>

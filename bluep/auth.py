@@ -55,25 +55,22 @@ class TOTPAuth:
     async def verify_and_create_session(
         self, key: str, request: Request, response: Response
     ) -> bool:
-        """Verify TOTP code and create a new session.
-
-        Args:
-            key: TOTP code to verify
-            request: FastAPI request object
-            response: FastAPI response object
-
-        Returns:
-            bool: True if authentication successful
-
-        Raises:
-            HTTPException: If authentication fails or rate limit exceeded
-        """
+        """Verify TOTP code and create a new session."""
         client_host = request.client.host if request.client else "0.0.0.0"
 
+        print(f"Verifying TOTP key: {key}")
+        print(f"Current valid TOTP: {self.totp.now()}")
+        print(f"Stored secret key: {self.secret_key}")
+
         if not self._check_rate_limit(client_host):
+            print(f"Rate limit exceeded for {client_host}")
             raise HTTPException(status_code=429, detail="Too many failed attempts")
 
-        if not self.totp.verify(key):
+        # Try both current and previous window to account for time drift
+        valid = self.totp.verify(key, valid_window=1)
+        print(f"TOTP verification result: {valid}")
+
+        if not valid:
             self._record_failed_attempt(client_host)
             raise HTTPException(status_code=403, detail="Invalid TOTP key")
 

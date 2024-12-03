@@ -33,14 +33,14 @@ class WebSocketMessage(BaseModel):
     for content synchronization and cursor position updates.
 
     Attributes:
-        type: Message type, either "content" or "cursor"
+        type: Message type, either "content", "cursor", or "pong"
         data: Optional text content of the message
         x: Optional cursor x-coordinate
         y: Optional cursor y-coordinate
         clientId: Optional client identifier
     """
 
-    type: Literal["content", "cursor"]
+    type: Literal["content", "cursor", "pong"]
     data: Optional[str] = None
     x: Optional[int] = None
     y: Optional[int] = None
