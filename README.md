@@ -79,6 +79,40 @@ https://<your-local-ip>:8500
 - pydantic
 - jinja2
 
+## Running as a System Service
+
+On Linux systems with systemd, you can install bluep as a system service:
+
+```bash
+# Install the service (requires sudo)
+sudo python install_service.py
+
+# Start the service
+sudo systemctl start bluep
+
+# Enable service to start on boot
+sudo systemctl enable bluep
+
+# Check service status
+sudo systemctl status bluep
+
+# View logs
+sudo journalctl -u bluep
+```
+
+The service will run with reduced privileges and several security measures enabled:
+- Private /tmp directory
+- Read-only access to /home
+- Protected system directories
+- No new privileges
+- No kernel module or tunable access
+- No device access
+
+You can customize the user the service runs as:
+```bash
+sudo python install_service.py --user your_username
+```
+
 ## License
 MIT License
 

@@ -65,13 +65,22 @@ class BlueApp:
         return templates.TemplateResponse("login.html", {"request": request})
 
     async def get(
-        self, request: Request, response: Response, key: Optional[str] = None
+        self,
+        request: Request,
+        response: Response,
+        key: Optional[str] = None
     ) -> Response:
-        """Handle main page access and authentication."""
+        """Handle main page access with session refresh."""
         if not key:
             return RedirectResponse(url="/login")
 
-        await self.auth.verify_and_create_session(key, request, response)
+        # Verify and create/refresh session
+        session_id = await self.auth.verify_and_create_session(key, request, response)
+
+        # Refresh session on subsequent requests
+        if session_id:
+            self.auth.session_manager.refresh_session(session_id, response)
+
         return templates.TemplateResponse(
             "editor.html",
             {
@@ -82,9 +91,7 @@ class BlueApp:
             },
         )
 
-    async def websocket_endpoint(
-        self, websocket: WebSocket, key: str = Query(...)
-    ) -> None:
+    async def websocket_endpoint(self, websocket: WebSocket, key: str = Query(...)) -> None:
         """Handle WebSocket connections for real-time collaboration."""
         if not self.auth.verify(key):
             await websocket.close(code=1008)
@@ -93,22 +100,27 @@ class BlueApp:
         await ws_manager.connect(websocket)
         try:
             while True:
-                msg = WebSocketMessage.model_validate_message(
-                    await websocket.receive_text()
-                )
+                raw_msg = await websocket.receive_text()
+
+                # Handle pong messages
+                if raw_msg == '{"type": "pong"}':
+                    await ws_manager.handle_pong(websocket)
+                    continue
+
+                # Handle regular messages
+                msg = WebSocketMessage.model_validate_message(raw_msg)
                 if msg.type == "content" and msg.data is not None:
                     ws_manager.update_shared_text(msg.data)
-                    await ws_manager.broadcast(
-                        msg.model_dump(exclude_none=True), exclude=websocket
-                    )
+                    await ws_manager.broadcast(msg.model_dump(exclude_none=True), exclude=websocket)
                 elif msg.type == "cursor":
                     cursor_data = msg.model_dump(exclude_none=True)
                     cursor_data["clientId"] = id(websocket)
                     await ws_manager.broadcast(cursor_data, exclude=websocket)
-        except asyncio.CancelledError:
+
+        except WebSocketDisconnect:
             await ws_manager.disconnect(websocket)
         except Exception as exc:
-            print(f"WebSocket error ({type(exc).__name__}): {exc}")
+            logger.error(f"WebSocket error ({type(exc).__name__}): {exc}")
             await ws_manager.disconnect(websocket)
 
     async def shutdown(signal_type: signal.Signals) -> None:
