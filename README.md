@@ -2,6 +2,16 @@
 
 A secure real-time collaborative text editor with TOTP authentication and a blue theme. Multiple users can connect and edit text simultaneously through their browsers.
 
+## Quick Start
+```bash
+# Clone the repository
+git clone https://github.com/glassontin/bluep.git
+cd bluep
+
+# Run the setup script
+python setup.py
+```
+
 ## Features
 - Two-factor authentication using TOTP
 - Real-time text synchronization across clients

@@ -4,8 +4,8 @@ This module defines the core data structures used for session management and
 websocket communication in the collaborative text editor.
 """
 
-from typing import Optional, Literal, Any, Dict
-from pydantic import BaseModel, field_validator
+from typing import Optional, Literal, Any
+from pydantic import BaseModel, field_validator, ValidationInfo
 from datetime import datetime
 
 
@@ -47,9 +47,17 @@ class WebSocketMessage(BaseModel):
     clientId: Optional[int] = None
 
     @field_validator("data")
-    def validate_data(cls, v: Optional[str], values: Dict[str, Any]) -> str:
-        """Validate data field for WebSocket messages."""
-        if values.get("type") == "content" and v is None:
+    def validate_data(cls, v: Optional[str], info: ValidationInfo) -> str:
+        """Validate data field for WebSocket messages.
+
+        Args:
+            v: The data value to validate
+            info: Validation context information
+
+        Returns:
+            str: Validated data string
+        """
+        if info.data.get("type") == "content" and v is None:
             return ""
         return v or ""
 
