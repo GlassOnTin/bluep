@@ -6,7 +6,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "bluep"
-version = "0.4.1"
+version = "0.4.2"
 authors = [
     { name = "GlassOnTin", email = "63980135+GlassOnTin@users.noreply.github.com" },
 ]
@@ -65,5 +65,7 @@ warn_no_return = true
 warn_unreachable = true
 
 [[tool.mypy.overrides]]
-module = ["qrcode.*"]
+module = [
+    "qrcode.*",
+]
 ignore_missing_imports = true
