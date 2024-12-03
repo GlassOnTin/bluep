@@ -4,64 +4,53 @@ This module handles user session creation, validation, and cleanup for
 authenticated users of the collaborative editor.
 """
 
-from datetime import datetime, timedelta
 import secrets
+from datetime import datetime, timedelta
 from typing import Dict, Optional
 import logging
-
 from fastapi import Response, Cookie
-from fastapi.security import APIKeyCookie
-
-from bluep.models import SessionData
+from .models import SessionData, ConnectionState
 
 logger = logging.getLogger(__name__)
 
 class SessionManager:
-    """Manages user sessions with secure cookie-based authentication."""
-
     def __init__(
         self,
         cookie_name: str = "bluep_session",
-        cookie_max_age: int = 86400,  # 24 hours
-        refresh_threshold: int = 3600  # 1 hour
+        cookie_max_age: int = 86400,
+        refresh_threshold: int = 3600
     ):
-        """Initialize session manager.
-
-        Args:
-            cookie_name: Name for session cookie
-            cookie_max_age: Session lifetime in seconds
-            refresh_threshold: Time before expiry to refresh session
-        """
         self.sessions: Dict[str, SessionData] = {}
+        self.websocket_tokens: Dict[str, str] = {}  # token -> session_id
         self.cookie_name = cookie_name
         self.cookie_max_age = cookie_max_age
         self.refresh_threshold = refresh_threshold
-        self.cookie_security = APIKeyCookie(name=cookie_name, auto_error=False)
+
+    def create_websocket_token(self, session_id: str) -> str:
+        token = secrets.token_urlsafe(32)
+        logger.debug(f"Creating new token {token} for session {session_id}")
+        self.websocket_tokens[token] = session_id
+        return token
+
+    def validate_websocket_token(self, token: str) -> Optional[str]:
+        return self.websocket_tokens.get(token)
 
     def create_session(self, username: str, response: Response) -> str:
-        """Create new user session with secure cookie."""
         session_id = secrets.token_urlsafe(32)
-        expiry = datetime.now() + timedelta(seconds=self.cookie_max_age)
+        websocket_token = self.create_websocket_token(session_id)
 
         self.sessions[session_id] = SessionData(
             username=username,
-            expiry=expiry,
-            last_totp_use=""
+            expiry=datetime.now() + timedelta(seconds=self.cookie_max_age),
+            last_totp_use="",
+            websocket_token=websocket_token,
+            connection_state=ConnectionState.INITIALIZING
         )
 
         self._set_cookie(response, session_id)
         return session_id
 
     def refresh_session(self, session_id: str, response: Response) -> bool:
-        """Refresh session if it's near expiration.
-
-        Args:
-            session_id: Session to refresh
-            response: Response object to update cookie
-
-        Returns:
-            bool: True if session was refreshed
-        """
         session = self.sessions.get(session_id)
         if not session:
             return False
@@ -70,13 +59,13 @@ class SessionManager:
         if time_to_expiry.total_seconds() < self.refresh_threshold:
             session.expiry = datetime.now() + timedelta(seconds=self.cookie_max_age)
             self._set_cookie(response, session_id)
-            logger.debug(f"Refreshed session for {session.username}")
+            # Maintain websocket token during refresh
+            if not session.websocket_token:
+                session.websocket_token = self.create_websocket_token(session_id)
             return True
-
         return False
 
     def _set_cookie(self, response: Response, session_id: str) -> None:
-        """Set secure session cookie."""
         response.set_cookie(
             key=self.cookie_name,
             value=session_id,
@@ -87,24 +76,35 @@ class SessionManager:
         )
 
     def get_session(self, session_id: str, response: Optional[Response] = None) -> Optional[SessionData]:
-        """Get and optionally refresh session."""
         session = self.sessions.get(session_id)
         if not session:
             return None
 
         if datetime.now() > session.expiry:
             del self.sessions[session_id]
+            # Clean up associated websocket token
+            if session.websocket_token:
+                self.websocket_tokens.pop(session.websocket_token, None)
             return None
 
-        # Only refresh if we have a response object (HTTP requests)
-        # WebSocket connections don't need to refresh cookies
         if response:
             self.refresh_session(session_id, response)
-
         return session
 
+    def cleanup_expired_sessions(self) -> None:
+        """Remove expired sessions and their associated tokens"""
+        current_time = datetime.now()
+        expired = [
+            sid for sid, session in self.sessions.items()
+            if current_time > session.expiry
+        ]
+
+        for sid in expired:
+            session = self.sessions.pop(sid)
+            if session.websocket_token:
+                self.websocket_tokens.pop(session.websocket_token, None)
+
     def validate_totp_use(self, session_id: str, totp_code: str) -> bool:
-        """Validate TOTP code hasn't been reused."""
         session = self.get_session(session_id)
         if not session:
             return False
@@ -112,5 +112,10 @@ class SessionManager:
         if session.last_totp_use == totp_code:
             return False
 
+        # Check connection state
+        if session.connection_state not in [None, ConnectionState.CLOSED, ConnectionState.INITIALIZING]:
+            return False
+
         session.last_totp_use = totp_code
+        session.connection_state = ConnectionState.INITIALIZING
         return True

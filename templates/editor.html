@@ -57,7 +57,7 @@
     </div>
     <script>
         // Create WebSocket with auth key
-        const wsUrl = `wss://${window.location.host}/ws?key={{key}}`;
+        const wsUrl = `wss://${window.location.host}/ws?token={{token}}`;
         let ws = new WebSocket(wsUrl);
 
         // Track connection state

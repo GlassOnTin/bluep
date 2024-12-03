@@ -4,59 +4,36 @@ This module defines the core data structures used for session management and
 websocket communication in the collaborative text editor.
 """
 
-from typing import Optional, Literal, Any
+from enum import Enum
+from typing import Optional, Literal, Any, Dict
 from pydantic import BaseModel, field_validator, ValidationInfo
 from datetime import datetime
 
+class ConnectionState(Enum):
+    INITIALIZING = "initializing"
+    AUTHENTICATING = "authenticating"
+    CONNECTED = "connected"
+    DISCONNECTING = "disconnecting"
+    CLOSED = "closed"
 
 class SessionData(BaseModel):
-    """Data structure for storing session information.
-
-    Contains user session data including username, expiry time, and TOTP usage
-    tracking for replay attack prevention.
-
-    Attributes:
-        username: User identifier for the session
-        expiry: Timestamp when the session expires
-        last_totp_use: The last TOTP code used, to prevent replay attacks
-    """
-
     username: str
     expiry: datetime
     last_totp_use: str
-
+    websocket_token: Optional[str] = None
+    connection_state: Optional[ConnectionState] = None
 
 class WebSocketMessage(BaseModel):
-    """Data structure for WebSocket communication messages.
-
-    Defines the structure of messages exchanged between clients and server
-    for content synchronization and cursor position updates.
-
-    Attributes:
-        type: Message type, either "content", "cursor", or "pong"
-        data: Optional text content of the message
-        x: Optional cursor x-coordinate
-        y: Optional cursor y-coordinate
-        clientId: Optional client identifier
-    """
-
-    type: Literal["content", "cursor", "pong"]
+    type: Literal["content", "cursor", "pong", "state", "error"]  # Added state and error
     data: Optional[str] = None
     x: Optional[int] = None
     y: Optional[int] = None
     clientId: Optional[int] = None
+    state: Optional[str] = None
+    error: Optional[str] = None
 
     @field_validator("data")
     def validate_data(cls, v: Optional[str], info: ValidationInfo) -> str:
-        """Validate data field for WebSocket messages.
-
-        Args:
-            v: The data value to validate
-            info: Validation context information
-
-        Returns:
-            str: Validated data string
-        """
         if info.data.get("type") == "content" and v is None:
             return ""
         return v or ""

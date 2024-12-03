@@ -6,7 +6,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "bluep"
-version = "0.4.5"
+version = "0.4.6"
 authors = [
     { name = "GlassOnTin", email = "63980135+GlassOnTin@users.noreply.github.com" },
 ]

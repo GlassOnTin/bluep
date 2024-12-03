@@ -1,13 +1,9 @@
-"""Authentication module for the bluep collaborative text editor.
-
-This module handles TOTP-based authentication, QR code generation, and rate limiting
-for the bluep application. It provides secure access control through time-based
-one-time passwords and protects against brute force attempts.
-"""
+"""Authentication module for the bluep collaborative text editor."""
 
 import base64
 import secrets
 import time
+import logging
 from io import BytesIO
 from typing import Dict, Tuple
 
@@ -19,31 +15,23 @@ from bluep.models import SessionData
 from bluep.secure_config import SecureConfig
 from bluep.session_manager import SessionManager
 
+logger = logging.getLogger(__name__)
 
 class TOTPAuth:
-    """Handles TOTP-based authentication and rate limiting.
-
-    This class manages TOTP secret generation, QR code creation, and authentication
-    verification with rate limiting to prevent brute force attacks.
-
-    Attributes:
-        config: Secure configuration manager for storing TOTP secrets
-        secret_key: TOTP secret key for generating codes
-        session_manager: Manager for user sessions
-        totp: TOTP generator instance
-        qr_base64: Base64 encoded QR code for TOTP setup
-        max_attempts: Maximum failed authentication attempts before lockout
-        lockout_time: Duration in seconds for authentication lockout
-    """
+    """Handles TOTP-based authentication and rate limiting."""
 
     def __init__(self) -> None:
         """Initialize the TOTP authentication manager."""
+        logger.debug("Initializing TOTPAuth")
         self.config = SecureConfig()
         self.secret_key = self.config.load_secret()
 
         if not self.secret_key:
             self.secret_key = pyotp.random_base32()
             self.config.save_secret(self.secret_key)
+            logger.debug("Generated new TOTP secret key")
+        else:
+            logger.debug("Loaded existing TOTP secret key")
 
         self.session_manager = SessionManager()
         self.totp = pyotp.TOTP(self.secret_key)
@@ -55,33 +43,54 @@ class TOTPAuth:
     async def verify_and_create_session(
         self, key: str, request: Request, response: Response
     ) -> bool:
-        """Verify TOTP code and create a new session."""
         client_host = request.client.host if request.client else "0.0.0.0"
-
-        print(f"Verifying TOTP key: {key}")
-        print(f"Current valid TOTP: {self.totp.now()}")
-        print(f"Stored secret key: {self.secret_key}")
+        logger.debug(f"Verifying TOTP for client: {client_host}")
 
         if not self._check_rate_limit(client_host):
-            print(f"Rate limit exceeded for {client_host}")
+            logger.warning(f"Rate limit exceeded for {client_host}")
             raise HTTPException(status_code=429, detail="Too many failed attempts")
 
-        # Try both current and previous window to account for time drift
-        valid = self.totp.verify(key, valid_window=1)
-        print(f"TOTP verification result: {valid}")
+        # Log the incoming key and expected key
+        current_totp = self.totp.now()
+        logger.debug(f"Received key: {key}")
+        logger.debug(f"Current TOTP: {current_totp}")
+        logger.debug(f"Time remaining: {30 - int(time.time()) % 30}s")
+
+        # Increase valid_window to handle time drift
+        valid = self.totp.verify(key, valid_window=2)
+        logger.debug(f"TOTP verification result: {valid}")
 
         if not valid:
             self._record_failed_attempt(client_host)
+            logger.warning(f"Invalid TOTP key from {client_host}")
             raise HTTPException(status_code=403, detail="Invalid TOTP key")
 
         session_id = self.session_manager.create_session(
             username=f"user_{secrets.token_hex(4)}", response=response
         )
+        logger.debug(f"Created session: {session_id}")
 
         if not self.session_manager.validate_totp_use(session_id, key):
+            logger.warning(f"TOTP code reuse detected for session {session_id}")
             raise HTTPException(status_code=403, detail="TOTP code already used")
 
+        logger.debug("Authentication successful")
         return True
+
+    async def verify_session(self, request: Request) -> SessionData:
+        cookie = request.cookies.get(self.session_manager.cookie_name)
+        if not cookie:
+            raise HTTPException(status_code=401, detail="No session found")
+
+        session = self.session_manager.get_session(cookie)
+        if not session:
+            raise HTTPException(status_code=401, detail="Invalid or expired session")
+
+        return session
+
+    def verify(self, key: str) -> bool:
+        """Verify a TOTP code."""
+        return bool(key) and self.totp.verify(key)
 
     def _generate_qr(self) -> str:
         """Generate QR code for TOTP setup.
@@ -106,17 +115,6 @@ class TOTPAuth:
         except Exception as e:
             print(f"QR generation error: {e}")
             return ""
-
-    def verify(self, key: str) -> bool:
-        """Verify a TOTP code.
-
-        Args:
-            key: TOTP code to verify
-
-        Returns:
-            bool: True if code is valid
-        """
-        return bool(key) and self.totp.verify(key)
 
     def _check_rate_limit(self, ip: str) -> bool:
         """Check if an IP has exceeded the rate limit.
