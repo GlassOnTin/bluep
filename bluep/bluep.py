@@ -100,81 +100,27 @@ class BlueApp:
             return RedirectResponse(url="/login")
 
     async def websocket_endpoint(self, websocket: WebSocket) -> None:
-        """Handle WebSocket connections for real-time collaboration."""
+        key = websocket.query_params.get('key')
+        if not key:
+            return
+
         try:
-            print("WebSocket request received")
+            await ws_manager.connect(websocket, key)
 
-            # Parse key from query parameters
-            key = None
-            for param in websocket.url.query.split('&'):
-                if param.startswith('key='):
-                    key = param.split('=')[1]
-                    break
+            while True:
+                raw_msg = await websocket.receive_text()
+                if raw_msg == '{"type": "pong"}':
+                    await ws_manager.handle_pong(websocket)
+                    continue
 
-            if not key:
-                print("No key provided")
-                await websocket.close(code=1008)
-                return
-
-            # Get session cookie from WebSocket request
-            cookie = websocket.cookies.get(self.auth.session_manager.cookie_name)
-
-            # If no session exists but we have a valid key, create a new session
-            if not cookie:
-                print("No session found, validating key")
-                try:
-                    # Create a dummy response to store the cookie
-                    response = Response()
-                    await self.auth.verify_and_create_session(key, websocket, response)
-                    cookie = response.headers.get("set-cookie").split(";")[0].split("=")[1]
-                    print(f"Created new session with cookie: {cookie[:8]}...")
-                except Exception as e:
-                    print(f"Failed to create session: {e}")
-                    await websocket.close(code=1008)
-                    return
-
-            # Validate session
-            session = self.auth.session_manager.get_session(cookie)
-            if not session:
-                print("Invalid or expired session")
-                await websocket.close(code=1008)
-                return
-
-            await ws_manager.connect(websocket)
-            print(f"WebSocket connected and initialized with session {cookie[:8]}...")
-
-            try:
-                while True:
-                    raw_msg = await websocket.receive_text()
-
-                    # Handle pong messages without validation
-                    if raw_msg == '{"type": "pong"}':
-                        await ws_manager.handle_pong(websocket)
-                        continue
-
-                    # Handle regular messages
-                    msg = WebSocketMessage.model_validate_message(raw_msg)
-                    if msg.type == "content" and msg.data is not None:
-                        ws_manager.update_shared_text(msg.data)
-                        await ws_manager.broadcast(msg.model_dump(exclude_none=True), exclude=websocket)
-                    elif msg.type == "cursor":
-                        cursor_data = msg.model_dump(exclude_none=True)
-                        cursor_data["clientId"] = id(websocket)
-                        await ws_manager.broadcast(cursor_data, exclude=websocket)
-
-            except WebSocketDisconnect:
-                print("WebSocket disconnected normally")
-                await ws_manager.disconnect(websocket)
-            except Exception as exc:
-                print(f"WebSocket error: {exc}")
-                await ws_manager.disconnect(websocket)
+                msg = WebSocketMessage.model_validate_json(raw_msg)
+                if msg.type == "content" and msg.data is not None:
+                    ws_manager.update_shared_text(msg.data)
+                    await ws_manager.broadcast(msg.model_dump(exclude_none=True), exclude=websocket)
 
         except Exception as e:
-            print(f"WebSocket connection error: {e}")
-            try:
-                await websocket.close(code=1008)
-            except Exception:
-                pass  # Already closed
+            print(f"WebSocket error: {e}")
+            await ws_manager.disconnect(websocket)
 
     async def shutdown(signal_type: signal.Signals) -> None:
         """Handle graceful shutdown of the application."""

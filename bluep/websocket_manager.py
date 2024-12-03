@@ -34,25 +34,27 @@ class WebSocketManager:
     def __init__(self, timeout: int = 3600):  # 1 hour timeout
         """Initialize the WebSocket manager."""
         self.active_connections: Dict[WebSocket, ConnectionInfo] = {}
+        self.totp_sessions: Dict[str, WebSocket] = {}
         self.shared_text: str = ""
         self.timeout = timeout
         self._lock = asyncio.Lock()
         self.ping_interval = 60 # seconds
 
-    async def connect(self, websocket: WebSocket) -> None:
+    async def connect(self, websocket: WebSocket, totp_code: str) -> None:
         """Accept a new WebSocket connection and initialize it."""
         try:
-            await websocket.accept()
-            print(f"New WebSocket connection established")
-
             async with self._lock:
+                if totp_code in self.totp_sessions:
+                    await self.disconnect(self.totp_sessions[totp_code])
+                await websocket.accept()
+                print(f"New WebSocket connection established")
                 self.active_connections[websocket] = ConnectionInfo(
                     last_active=time.time(),
                     pending_pings=0
                 )
+                self.totp_sessions[totp_code] = websocket
                 print(f"Active connections: {len(self.active_connections)}")
 
-            # Start keep-alive task
             asyncio.create_task(self._keep_alive(websocket))
             await self.broadcast_client_count()
             await self.send_current_text(websocket)

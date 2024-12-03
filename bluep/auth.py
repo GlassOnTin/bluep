@@ -49,8 +49,8 @@ class TOTPAuth:
         self.totp = pyotp.TOTP(self.secret_key)
         self.qr_base64 = self._generate_qr()
         self._failed_attempts: Dict[str, Tuple[int, float]] = {}
-        self.max_attempts = 3
-        self.lockout_time = 300  # 5 minutes
+        self.max_attempts = 5
+        self.lockout_time = 30  # seconds
 
     async def verify_and_create_session(
         self, key: str, request: Request, response: Response

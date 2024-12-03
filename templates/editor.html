@@ -83,7 +83,11 @@
         ws.onclose = (event) => {
             console.log('WebSocket closed:', event.code, event.reason);
             isConnected = false;
-            handleDisconnect();
+            if (event.code === 403) {
+                handleTOTPExpiry();
+            } else {
+                handleDisconnect();
+            }
         };
 
         ws.onerror = (error) => {
@@ -130,6 +134,12 @@
         function checkActivity() {
             if (Date.now() - lastActivity > ACTIVITY_TIMEOUT) {
                 window.location.reload(); // Refresh page if inactive
+            }
+        }
+
+        function handleTOTPExpiry() {
+            if (ws.readyState === WebSocket.CLOSED) {
+                window.location.href = '/login';
             }
         }
 
