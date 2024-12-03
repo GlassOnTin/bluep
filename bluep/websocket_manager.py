@@ -37,7 +37,7 @@ class WebSocketManager:
         self.shared_text: str = ""
         self.timeout = timeout
         self._lock = asyncio.Lock()
-        self.ping_interval = 30  # Send ping every 30 seconds
+        self.ping_interval = 60 # seconds
 
     async def connect(self, websocket: WebSocket) -> None:
         """Accept a new WebSocket connection and initialize it."""

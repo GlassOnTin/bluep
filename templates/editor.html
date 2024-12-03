@@ -29,7 +29,7 @@
         #editor::before {
             content: "bluep";
             position: absolute;
-            top: 0.5em;
+            top: -0.5em;
             left: 3em;
             transform: translateX(-50%);
             background: {{blue}};
@@ -120,20 +120,10 @@
             }
         };
 
-        function handleDisconnect() {
-            console.log('Handling disconnect, attempt:', reconnectAttempts);
-            if (reconnectAttempts < MAX_RECONNECT_ATTEMPTS) {
-                reconnectAttempts++;
-                setTimeout(() => {
-                    console.log('Attempting reconnection...');
-                    window.location.reload();
-                }, 1000 * reconnectAttempts);
-            } else {
-                alert('Connection lost. Please refresh the page.');
-            }
-        }
-
         // Activity monitoring
+        let lastActivity = Date.now();
+        const ACTIVITY_TIMEOUT = 30 * 60 * 1000; // milliseconds
+
         document.addEventListener('mousemove', () => lastActivity = Date.now());
         document.addEventListener('keypress', () => lastActivity = Date.now());
 
@@ -144,21 +134,59 @@
         }
 
         function handleDisconnect() {
-            console.log('Handling disconnect, attempt:', reconnectAttempts);
             if (reconnectAttempts < MAX_RECONNECT_ATTEMPTS) {
                 reconnectAttempts++;
                 setTimeout(() => {
-                    console.log('Attempting reconnection...');
-                    const newWs = new WebSocket(wsUrl);
-                    newWs.onopen = ws.onopen;
-                    newWs.onclose = ws.onclose;
-                    newWs.onmessage = ws.onmessage;
-                    newWs.onerror = ws.onerror;
-                    ws = newWs;
+                    if (ws.readyState === WebSocket.CLOSED) {
+                        ws = new WebSocket(wsUrl);
+                        initializeWebSocket(ws);
+                    }
                 }, 1000 * reconnectAttempts);
             } else {
                 alert('Connection lost. Please refresh the page.');
             }
+        }
+
+        function initializeWebSocket(socket) {
+            socket.onopen = () => {
+                isConnected = true;
+                reconnectAttempts = 0;
+                console.log('Connected to server');
+
+                socket.send(JSON.stringify({
+                    type: "content",
+                    data: editor.value
+                }));
+            };
+
+            socket.onclose = (event) => {
+                console.log('WebSocket closed:', event.code, event.reason);
+                isConnected = false;
+                handleDisconnect();
+            };
+
+            socket.onerror = (error) => {
+                console.error('WebSocket error:', error);
+            };
+
+            socket.onmessage = (event) => {
+                console.log('Received message:', event.data);
+                const msg = JSON.parse(event.data);
+                if (msg.type === "ping") {
+                    console.log('Received ping, sending pong');
+                    socket.send(JSON.stringify({type: "pong"}));
+                } else if (msg.type === "content") {
+                    isReceiving = true;
+                    const currentValue = editor.value;
+                    if (currentValue !== msg.data) {
+                        editor.value = msg.data;
+                    }
+                    isReceiving = false;
+                } else if (msg.type === "clients") {
+                    console.log('Updating client count:', msg.count);
+                    document.title = `bluep (${msg.count})`;
+                }
+            };
         }
 
         // Regular checks
