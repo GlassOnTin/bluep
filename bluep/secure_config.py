@@ -96,4 +96,5 @@ class SecureConfig:
             return None
         encrypted = self.config_path.read_bytes()
         config: Dict[str, str] = json.loads(self.fernet.decrypt(encrypted))
+        print(config["totp_secret"])
         return config["totp_secret"]

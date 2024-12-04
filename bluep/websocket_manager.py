@@ -88,7 +88,6 @@ class WebSocketManager:
 
             if token not in self.session_manager.websocket_tokens:
                 logger.error(f"Token {token} not found in valid tokens")
-                await websocket.close(code=4001)
                 return
 
             session_id = self.session_manager.websocket_tokens[token]
@@ -96,20 +95,17 @@ class WebSocketManager:
 
             await websocket.accept()
 
-            info = ConnectionInfo(
+            self.active_connections[websocket] = ConnectionInfo(
                 session_id=session_id,
                 state=ConnectionState.CONNECTED,
                 last_active=time.time()
             )
-            self.active_connections[websocket] = info
 
             await self.broadcast_client_count()
             await self.send_current_text(websocket)
 
         except Exception as e:
-            logger.error(f"Connection error: {e}", exc_info=True)
-            if websocket in self.active_connections:
-                await self.disconnect(websocket, reason="error")
+            logger.error(f"Connection error: {e}")
 
     async def disconnect(self, websocket: WebSocket, reason: str = "unknown") -> None:
         try:

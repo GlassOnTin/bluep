@@ -6,12 +6,14 @@ import signal
 import sys
 from io import BytesIO
 from typing import Optional
+import base64
 
 from fastapi import FastAPI, WebSocket, Request, HTTPException, WebSocketDisconnect
 from fastapi.responses import Response, RedirectResponse
 from fastapi.templating import Jinja2Templates
 from PIL import Image
 import uvicorn
+import qrcode
 
 from .auth import TOTPAuth
 from .config import Settings
@@ -44,15 +46,51 @@ class BlueApp:
 
     async def setup(self, request: Request) -> Response:
         """Serve the TOTP setup page."""
+        # Generate fresh QR code base64 string using the auth instance
+        qr_base64 = self.auth._generate_qr()
+
         return templates.TemplateResponse(
             "setup.html",
             {
                 "request": request,
-                "qr_code": self.auth.qr_base64,
+                "qr_code": qr_base64,
                 "secret_key": self.auth.secret_key,
                 "current_token": self.auth.totp.now(),
             },
         )
+
+    async def qr_raw(self) -> Response:
+        """Generate and serve the TOTP QR code.
+
+        Returns:
+            Response: PNG image of the QR code
+        """
+        try:
+            qr = qrcode.QRCode(version=1, box_size=10, border=5)
+            provisioning_uri = self.auth.totp.provisioning_uri("Bluep Room", issuer_name="Bluep")
+            qr.add_data(provisioning_uri)
+            qr.make(fit=True)
+
+            img_bytes = BytesIO()
+            img = qr.make_image(fill_color="black", back_color="white")
+            img.save(img_bytes, format="PNG")
+            img_bytes.seek(0)
+
+            return Response(
+                content=img_bytes.getvalue(),
+                media_type="image/png"
+            )
+        except Exception as e:
+            logger.error(f"Error generating QR code: {e}")
+            # Return a simple error image
+            img = Image.new('RGB', (100, 100), color='red')
+            img_bytes = BytesIO()
+            img.save(img_bytes, format='PNG')
+            img_bytes.seek(0)
+            return Response(
+                content=img_bytes.getvalue(),
+                media_type="image/png"
+            )
 
     async def login(self, request: Request) -> Response:
         """Serve the login page."""
@@ -137,24 +175,6 @@ class BlueApp:
         buffer = BytesIO()
         img.save(buffer, format="PNG")
         return Response(content=buffer.getvalue(), media_type="image/png")
-
-    async def qr_raw(self) -> Response:
-        """Generate and serve the TOTP QR code.
-
-        Returns:
-            Response: PNG image of the QR code
-        """
-        qr = qrcode.QRCode(version=1, box_size=10, border=5)
-        qr.add_data(self.auth.totp.provisioning_uri("Bluep Room", issuer_name="Bluep"))
-        qr.make(fit=True)
-
-        img = qr.make_image(fill_color="black", back_color="white")
-        img_bytes = BytesIO()
-        img.save(img_bytes, format="PNG")
-        img_bytes.seek(0)
-
-        return Response(content=img_bytes.getvalue(), media_type="image/png")
-
 
     async def shutdown(self, signal_type: signal.Signals) -> None:
         """Handle graceful shutdown of the application."""
