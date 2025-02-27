@@ -36,7 +36,7 @@ class SessionData(BaseModel):
     # added as an instance attribute after creation
 
 class WebSocketMessage(BaseModel):
-    type: Literal["content", "cursor", "pong", "state", "error", "file-announce", "file-request", "file-data"]
+    type: Literal["content", "cursor", "pong", "state", "error", "file-announce", "file-request", "file-data", "clear-files"]
     data: Optional[str] = None
     x: Optional[int] = None
     y: Optional[int] = None

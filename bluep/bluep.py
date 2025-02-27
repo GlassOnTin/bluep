@@ -230,6 +230,12 @@ class BlueApp:
                 elif msg.type == "file-data":
                     # Forward file data chunks to the requesting client
                     await self.ws_manager.broadcast(msg.model_dump(exclude_none=True), exclude=websocket)
+                    
+                elif msg.type == "clear-files":
+                    # Clear file listings on all clients
+                    await self.ws_manager.broadcast({"type": "clear-files"}, exclude=None)
+                    # Clear server-side file metadata
+                    self.ws_manager.available_files.clear()
 
         except WebSocketDisconnect:
             if websocket in self.ws_manager.active_connections:

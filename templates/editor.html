@@ -65,6 +65,7 @@
             align-items: center;
             color: #fff;
             transition: all 0.3s ease;
+            position: relative;
         }
         #file-drop-area.drag-over {
             background-color: rgba(255, 255, 255, 0.2);
@@ -93,6 +94,26 @@
             margin-right: 8px;
             font-size: 18px;
         }
+        #clear-files {
+            position: absolute;
+            bottom: 8px;
+            right: 8px;
+            background-color: rgba(255, 255, 255, 0.1);
+            color: white;
+            border: none;
+            border-radius: 4px;
+            width: 30px;
+            height: 30px;
+            font-size: 16px;
+            cursor: pointer;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            transition: background-color 0.2s;
+        }
+        #clear-files:hover {
+            background-color: rgba(255, 255, 255, 0.3);
+        }
     </style>
     <script src="/static/js/crypto-utils.js"></script>
 </head>
@@ -103,6 +124,7 @@
     <div id="file-drop-area">
         <p>Drop files here to share</p>
         <div id="file-list"></div>
+        <button id="clear-files" title="Clear all file listings">🗑️</button>
     </div>
     <script>
         // Security: Verify the connection and check for tampering
@@ -224,6 +246,10 @@
                     }
                 } else if (msg.type === "file-data") {
                     handleFileData(msg);
+                } else if (msg.type === "clear-files") {
+                    // Clear file listings
+                    fileList.innerHTML = '';
+                    availableFiles = {};
                 }
             };
     
@@ -256,6 +282,22 @@
     
             document.addEventListener('mousemove', () => lastActivity = Date.now());
             document.addEventListener('keypress', () => lastActivity = Date.now());
+            
+            // Set up clear files button
+            document.getElementById('clear-files').addEventListener('click', () => {
+                // Clear local UI
+                fileList.innerHTML = '';
+                
+                // Clear local storage
+                availableFiles = {};
+                
+                // Send clear message to all clients
+                if (isConnected) {
+                    ws.send(JSON.stringify({
+                        type: "clear-files"
+                    }));
+                }
+            });
             
             // File drag and drop implementation
             const fileDropArea = document.getElementById('file-drop-area');
