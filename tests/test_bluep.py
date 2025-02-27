@@ -37,3 +37,32 @@ def test_favicon_with_auth(client, auth):
     # Test without auth
     response = client.get("/favicon.png")
     assert response.status_code == 403
+
+def test_encrypted_message_model():
+    """Test that encrypted message models work correctly"""
+    from bluep.models import WebSocketMessage
+    
+    # Create an encrypted message
+    encrypted_msg = WebSocketMessage(
+        type="content",
+        data="encrypted_data_here",
+        encrypted=True
+    )
+    
+    # Verify the message has the encrypted flag
+    assert encrypted_msg.encrypted is True
+    
+    # Test serialization and deserialization
+    msg_json = encrypted_msg.model_dump_json()
+    deserialized = WebSocketMessage.model_validate_json(msg_json)
+    
+    # Verify encryption flag is preserved
+    assert deserialized.encrypted is True
+    
+    # Test default is False
+    regular_msg = WebSocketMessage(type="content", data="regular data")
+    assert regular_msg.encrypted is False
+    
+    # Test dumping to dict preserves encrypted flag
+    msg_dict = encrypted_msg.model_dump(exclude_none=True)
+    assert msg_dict.get("encrypted") is True

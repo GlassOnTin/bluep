@@ -66,18 +66,125 @@
         const MAX_RECONNECT_ATTEMPTS = 5;
         const editor = document.querySelector('#editor textarea');
         let isReceiving = false;
+        
+        // Encryption key - derived from the token plus a fixed salt
+        // In a real production system, you would use a more robust key exchange mechanism
+        const encryptionKey = "{{token}}salt_bluep_secure";
+        
+        // Simple encryption/decryption functions using AES from SubtleCrypto
+        async function encryptText(text) {
+            const encoder = new TextEncoder();
+            const data = encoder.encode(text);
+            
+            // Create a key from the encryption key string
+            const keyMaterial = await window.crypto.subtle.importKey(
+                "raw",
+                encoder.encode(encryptionKey),
+                { name: "PBKDF2" },
+                false,
+                ["deriveBits", "deriveKey"]
+            );
+            
+            // Derive an AES-GCM key
+            const key = await window.crypto.subtle.deriveKey(
+                {
+                    name: "PBKDF2",
+                    salt: encoder.encode("bluep_salt"),
+                    iterations: 100000,
+                    hash: "SHA-256"
+                },
+                keyMaterial,
+                { name: "AES-GCM", length: 256 },
+                false,
+                ["encrypt", "decrypt"]
+            );
+            
+            // Generate an IV
+            const iv = window.crypto.getRandomValues(new Uint8Array(12));
+            
+            // Encrypt the data
+            const encryptedContent = await window.crypto.subtle.encrypt(
+                {
+                    name: "AES-GCM",
+                    iv: iv
+                },
+                key,
+                data
+            );
+            
+            // Combine IV and encrypted content
+            const encryptedBuffer = new Uint8Array(iv.byteLength + encryptedContent.byteLength);
+            encryptedBuffer.set(iv, 0);
+            encryptedBuffer.set(new Uint8Array(encryptedContent), iv.byteLength);
+            
+            // Convert to base64 for transmission
+            return btoa(String.fromCharCode.apply(null, encryptedBuffer));
+        }
+        
+        async function decryptText(encryptedText) {
+            try {
+                const encoder = new TextEncoder();
+                
+                // Convert from base64
+                const encryptedBuffer = Uint8Array.from(atob(encryptedText), c => c.charCodeAt(0));
+                
+                // Extract IV and encrypted content
+                const iv = encryptedBuffer.slice(0, 12);
+                const encryptedContent = encryptedBuffer.slice(12);
+                
+                // Create a key from the encryption key string
+                const keyMaterial = await window.crypto.subtle.importKey(
+                    "raw",
+                    encoder.encode(encryptionKey),
+                    { name: "PBKDF2" },
+                    false,
+                    ["deriveBits", "deriveKey"]
+                );
+                
+                // Derive an AES-GCM key
+                const key = await window.crypto.subtle.deriveKey(
+                    {
+                        name: "PBKDF2",
+                        salt: encoder.encode("bluep_salt"),
+                        iterations: 100000,
+                        hash: "SHA-256"
+                    },
+                    keyMaterial,
+                    { name: "AES-GCM", length: 256 },
+                    false,
+                    ["encrypt", "decrypt"]
+                );
+                
+                // Decrypt the data
+                const decryptedContent = await window.crypto.subtle.decrypt(
+                    {
+                        name: "AES-GCM",
+                        iv: iv
+                    },
+                    key,
+                    encryptedContent
+                );
+                
+                // Convert to text
+                return new TextDecoder().decode(decryptedContent);
+            } catch (e) {
+                console.error("Decryption error:", e);
+                return "Error decrypting message";
+            }
+        }
 
-        ws.onopen = () => {
+        ws.onopen = async () => {
             isConnected = true;
             reconnectAttempts = 0;
             console.log('Connected to server');
 
-            // Send initial message
+            // Send initial message with encrypted content
+            const encryptedData = await encryptText("bluep");
             ws.send(JSON.stringify({
                 type: "content",
-                data: "bluep"
+                data: encryptedData,
+                encrypted: true
             }));
-
         };
 
         ws.onclose = (event) => {
@@ -95,31 +202,48 @@
         };
 
         // Add message handler
-        ws.onmessage = (event) => {
-            console.log('Received message:', event.data);
+        ws.onmessage = async (event) => {
+            // Don't log the full message content as it may contain sensitive data
+            console.log('Received message type:', JSON.parse(event.data).type);
+            
             const msg = JSON.parse(event.data);
             if (msg.type === "ping") {
                 console.log('Received ping, sending pong');
                 ws.send(JSON.stringify({type: "pong"}));
             } else if (msg.type === "content") {
                 isReceiving = true;
+                
+                // Handle encrypted content
+                let content = msg.data;
+                if (msg.encrypted) {
+                    try {
+                        content = await decryptText(msg.data);
+                    } catch (e) {
+                        console.error("Failed to decrypt message:", e);
+                        content = "Error: Could not decrypt message";
+                    }
+                }
+                
                 const currentValue = editor.value;
-                if (currentValue !== msg.data) {
-                    editor.value = msg.data;
+                if (currentValue !== content) {
+                    editor.value = content;
                 }
                 isReceiving = false;
             } else if (msg.type === "clients") {
-                console.log('Updating client count:', msg.count);
+                // Don't log client IP information, just update the counter
                 document.title = `bluep (${msg.count})`;
             }
         };
 
-        editor.oninput = () => {
+        editor.oninput = async () => {
             if (!isReceiving && isConnected) {
                 const content = editor.value;
+                // Encrypt the content before sending
+                const encryptedData = await encryptText(content);
                 ws.send(JSON.stringify({
                     type: "content",
-                    data: content
+                    data: encryptedData,
+                    encrypted: true
                 }));
             }
         };
@@ -158,14 +282,17 @@
         }
 
         function initializeWebSocket(socket) {
-            socket.onopen = () => {
+            socket.onopen = async () => {
                 isConnected = true;
                 reconnectAttempts = 0;
                 console.log('Connected to server');
 
+                // Encrypt content before sending
+                const encryptedData = await encryptText(editor.value);
                 socket.send(JSON.stringify({
                     type: "content",
-                    data: editor.value
+                    data: encryptedData,
+                    encrypted: true
                 }));
             };
 
@@ -179,21 +306,35 @@
                 console.error('WebSocket error:', error);
             };
 
-            socket.onmessage = (event) => {
-                console.log('Received message:', event.data);
+            socket.onmessage = async (event) => {
+                // Don't log the full message content as it may contain sensitive data
+                console.log('Received message type:', JSON.parse(event.data).type);
+                
                 const msg = JSON.parse(event.data);
                 if (msg.type === "ping") {
                     console.log('Received ping, sending pong');
                     socket.send(JSON.stringify({type: "pong"}));
                 } else if (msg.type === "content") {
                     isReceiving = true;
+                    
+                    // Handle encrypted content
+                    let content = msg.data;
+                    if (msg.encrypted) {
+                        try {
+                            content = await decryptText(msg.data);
+                        } catch (e) {
+                            console.error("Failed to decrypt message:", e);
+                            content = "Error: Could not decrypt message";
+                        }
+                    }
+                    
                     const currentValue = editor.value;
-                    if (currentValue !== msg.data) {
-                        editor.value = msg.data;
+                    if (currentValue !== content) {
+                        editor.value = content;
                     }
                     isReceiving = false;
                 } else if (msg.type === "clients") {
-                    console.log('Updating client count:', msg.count);
+                    // Don't log client IP information, just update the counter
                     document.title = `bluep (${msg.count})`;
                 }
             };

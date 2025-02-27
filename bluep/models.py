@@ -31,12 +31,18 @@ class WebSocketMessage(BaseModel):
     clientId: Optional[int] = None
     state: Optional[str] = None
     error: Optional[str] = None
+    encrypted: Optional[bool] = False
 
     @field_validator("data")
     def validate_data(cls, v: Optional[str], info: ValidationInfo) -> str:
         if info.data.get("type") == "content" and v is None:
             return ""
         return v or ""
+        
+    @field_validator("encrypted")
+    def validate_encrypted(cls, v: Optional[bool], info: ValidationInfo) -> bool:
+        # Default to False if not provided
+        return bool(v)
 
     @classmethod
     def model_validate_message(cls, data: str) -> "WebSocketMessage":

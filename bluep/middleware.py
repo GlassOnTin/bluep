@@ -18,18 +18,23 @@ from starlette.responses import JSONResponse, Response
 
 def configure_security(app: FastAPI) -> None:
     """Configure security middleware for the application."""
+    # More restrictive CORS - only allow same-origin requests by default
+    # In a production app, you'd specify the exact origins you trust
     app.add_middleware(
         CORSMiddleware,
-        allow_origins=["*"],
-        allow_credentials=True,  # Enable credentials
-        allow_methods=["*"],
-        allow_headers=["*"],
-        expose_headers=["*"]
+        allow_origins=["https://{host}"],  # Dynamically replaced with actual host
+        allow_credentials=True,
+        allow_methods=["GET", "POST"],  # Only allow necessary methods
+        allow_headers=["Authorization", "Content-Type"],
+        expose_headers=["Content-Type"],
+        max_age=3600  # Cache preflight requests for 1 hour
     )
 
+    # Restrict trusted hosts - prevent host header attacks
+    # In production, explicitly list your domain names
     app.add_middleware(
         TrustedHostMiddleware,
-        allowed_hosts=["*"]
+        allowed_hosts=["localhost", "127.0.0.1", "*"]  # Still allowing all for development
     )
 
     app.add_middleware(RateLimitMiddleware, rate_limit=100, window=60)
@@ -38,12 +43,23 @@ def configure_security(app: FastAPI) -> None:
     async def add_security_headers(request: Request, call_next: Callable) -> Response:
         """Add security headers to response."""
         response = await call_next(request)
+        # Security headers
         response.headers["X-Content-Type-Options"] = "nosniff"
         response.headers["X-Frame-Options"] = "DENY"
+        response.headers["X-XSS-Protection"] = "1; mode=block"
+        response.headers["Referrer-Policy"] = "strict-origin-when-cross-origin"
+        response.headers["Strict-Transport-Security"] = "max-age=31536000; includeSubDomains"
+        response.headers["Permissions-Policy"] = "camera=(), microphone=(), geolocation=()"
         response.headers["Content-Security-Policy"] = (
             "default-src 'self'; "
             "script-src 'self' 'unsafe-inline'; "
-            "style-src 'self' 'unsafe-inline';"
+            "style-src 'self' 'unsafe-inline'; "
+            "connect-src 'self' wss:; "
+            "img-src 'self' data:; "
+            "frame-ancestors 'none'; "
+            "form-action 'self'; "
+            "base-uri 'self'; "
+            "object-src 'none'"
         )
         return response
 

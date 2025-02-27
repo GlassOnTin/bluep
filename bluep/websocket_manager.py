@@ -133,28 +133,38 @@ class WebSocketManager:
 
     async def broadcast(self, message: Dict[str, Any], exclude: Optional[WebSocket] = None) -> None:
         disconnected = []
+        connections_to_broadcast = []
 
+        # First collect all connections while holding the lock
         async with self._lock:
-            for connection in self.active_connections:
-                if connection != exclude and self.active_connections[connection].state == ConnectionState.CONNECTED:
-                    try:
-                        if connection.application_state == WebSocketState.CONNECTED:
-                            await connection.send_json(message)
-                    except WebSocketDisconnect:
-                        disconnected.append(connection)
-                    except Exception as e:
-                        logger.error(f"Error during broadcast: {e}")
-                        disconnected.append(connection)
+            for connection, info in self.active_connections.items():
+                if connection != exclude and info.state == ConnectionState.CONNECTED:
+                    connections_to_broadcast.append(connection)
 
+        # Then send messages without holding the lock to prevent deadlocks
+        for connection in connections_to_broadcast:
+            try:
+                if connection.application_state == WebSocketState.CONNECTED:
+                    await connection.send_json(message)
+            except WebSocketDisconnect:
+                disconnected.append(connection)
+            except Exception as e:
+                logger.error(f"Error during broadcast: {e}")
+                disconnected.append(connection)
+
+        # Finally handle disconnections
         for connection in disconnected:
             await self.disconnect(connection, reason="broadcast_error")
 
     async def broadcast_client_count(self) -> None:
         try:
-            connected_count = sum(
-                1 for info in self.active_connections.values()
-                if info.state == ConnectionState.CONNECTED
-            )
+            # Get count while holding lock
+            async with self._lock:
+                connected_count = sum(
+                    1 for info in self.active_connections.values()
+                    if info.state == ConnectionState.CONNECTED
+                )
+            # Broadcast without holding lock to prevent deadlocks
             await self.broadcast({"type": "clients", "count": connected_count})
         except Exception as e:
             logger.error(f"Error broadcasting client count: {e}")
@@ -162,21 +172,30 @@ class WebSocketManager:
     async def send_current_text(self, websocket: WebSocket) -> None:
         try:
             if websocket.application_state == WebSocketState.CONNECTED:
+                # Get current text while holding the lock
+                async with self._lock:
+                    current_text = self.shared_text
+                    
+                # Send without holding the lock to prevent deadlocks
+                # We assume that if text is saved, it maintains its encryption status
                 await websocket.send_json({
                     "type": "content",
-                    "data": self.shared_text
+                    "data": current_text,
+                    "encrypted": True  # Assume all content is encrypted now
                 })
         except Exception as e:
             logger.error(f"Error sending current text: {e}")
             await self.disconnect(websocket, reason="send_error")
 
-    def update_shared_text(self, text: str) -> None:
-        self.shared_text = text
+    async def update_shared_text(self, text: str) -> None:
+        async with self._lock:
+            self.shared_text = text
 
     async def handle_pong(self, websocket: WebSocket) -> None:
-        if websocket in self.active_connections:
-            self.active_connections[websocket].pending_pings = 0
-            self.active_connections[websocket].last_active = time.time()
+        async with self._lock:
+            if websocket in self.active_connections:
+                self.active_connections[websocket].pending_pings = 0
+                self.active_connections[websocket].last_active = time.time()
 
     def _is_valid_transition(
         self,

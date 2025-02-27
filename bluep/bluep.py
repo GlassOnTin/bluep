@@ -151,8 +151,13 @@ class BlueApp:
 
                 msg = WebSocketMessage.model_validate_json(raw_msg)
                 if msg.type == "content" and msg.data is not None:
-                    self.ws_manager.update_shared_text(msg.data)
-                    await self.ws_manager.broadcast(msg.model_dump(exclude_none=True), exclude=websocket)
+                    # For encrypted messages, store the encrypted form
+                    # Clients will decrypt the content on their side
+                    await self.ws_manager.update_shared_text(msg.data)
+                    
+                    # Preserve the encrypted flag when broadcasting
+                    message_data = msg.model_dump(exclude_none=True)
+                    await self.ws_manager.broadcast(message_data, exclude=websocket)
 
         except WebSocketDisconnect:
             if websocket in self.ws_manager.active_connections:
@@ -170,7 +175,12 @@ class BlueApp:
         sys.exit(0)
 
     async def favicon(self, key: Optional[str] = None) -> Response:
-        """Serve the favicon without auth check"""
+        """Serve the favicon, requiring auth if no key is provided"""
+        # If key is provided, it was already authenticated via the route
+        # If no key is provided, return 403 Forbidden
+        if key is None:
+            return Response(status_code=403, content="Authentication required")
+            
         img = Image.new("RGB", (32, 32), settings.blue_color)
         buffer = BytesIO()
         img.save(buffer, format="PNG")
