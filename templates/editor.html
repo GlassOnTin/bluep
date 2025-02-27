@@ -12,10 +12,12 @@
             width: calc(100vw - 32px);
             background: {{blue}};
             overflow: hidden;
+            display: flex;
+            flex-direction: column;
         }
         #editor {
             width: 100%;
-            height: 100%;
+            flex-grow: 1;
             margin: 0;
             padding: 16px;
             background-color: {{blue}};
@@ -50,12 +52,57 @@
             padding: 16px;
             box-sizing: border-box;
         }
+        #file-drop-area {
+            height: 80px;
+            width: 100%;
+            margin-top: 16px;
+            background-color: rgba(255, 255, 255, 0.1);
+            border: 2px dashed rgba(255, 255, 255, 0.3);
+            border-radius: 4px;
+            display: flex;
+            flex-direction: column;
+            justify-content: center;
+            align-items: center;
+            color: #fff;
+            transition: all 0.3s ease;
+        }
+        #file-drop-area.drag-over {
+            background-color: rgba(255, 255, 255, 0.2);
+            border-color: rgba(255, 255, 255, 0.5);
+        }
+        #file-list {
+            width: 100%;
+            padding: 8px;
+            display: flex;
+            flex-wrap: wrap;
+            gap: 8px;
+        }
+        .file-item {
+            display: flex;
+            align-items: center;
+            background-color: rgba(255, 255, 255, 0.1);
+            padding: 6px 12px;
+            border-radius: 4px;
+            cursor: pointer;
+            transition: background-color 0.2s ease;
+        }
+        .file-item:hover {
+            background-color: rgba(255, 255, 255, 0.2);
+        }
+        .file-icon {
+            margin-right: 8px;
+            font-size: 18px;
+        }
     </style>
     <script src="/static/js/crypto-utils.js"></script>
 </head>
 <body>
     <div id="editor">
         <textarea autofocus></textarea>
+    </div>
+    <div id="file-drop-area">
+        <p>Drop files here to share</p>
+        <div id="file-list"></div>
     </div>
     <script>
         // Security: Verify the connection and check for tampering
@@ -167,6 +214,16 @@
                     isReceiving = false;
                 } else if (msg.type === "clients") {
                     document.title = `bluep (${msg.count})`;
+                } else if (msg.type === "file-announce") {
+                    handleFileAnnouncement(msg);
+                } else if (msg.type === "file-request" && msg.fileId) {
+                    // Someone requested a file we have
+                    const fileId = msg.fileId;
+                    if (availableFiles[fileId] && availableFiles[fileId].isLocal) {
+                        sendFile(fileId);
+                    }
+                } else if (msg.type === "file-data") {
+                    handleFileData(msg);
                 }
             };
     
@@ -199,6 +256,357 @@
     
             document.addEventListener('mousemove', () => lastActivity = Date.now());
             document.addEventListener('keypress', () => lastActivity = Date.now());
+            
+            // File drag and drop implementation
+            const fileDropArea = document.getElementById('file-drop-area');
+            const fileList = document.getElementById('file-list');
+            const MAX_FILE_SIZE = 50 * 1024 * 1024; // 50MB limit
+            const CHUNK_SIZE = 64 * 1024; // 64KB chunks for file transfer
+            let availableFiles = {}; // Store file metadata from other clients
+            
+            // Set up drag and drop event handlers
+            fileDropArea.addEventListener('dragover', (e) => {
+                e.preventDefault();
+                fileDropArea.classList.add('drag-over');
+            });
+            
+            fileDropArea.addEventListener('dragleave', () => {
+                fileDropArea.classList.remove('drag-over');
+            });
+            
+            fileDropArea.addEventListener('drop', async (e) => {
+                e.preventDefault();
+                fileDropArea.classList.remove('drag-over');
+                
+                if (!e.dataTransfer.files.length) return;
+                
+                const file = e.dataTransfer.files[0]; // Just handle the first file for now
+                
+                if (file.size > MAX_FILE_SIZE) {
+                    alert(`File too large. Maximum size is ${MAX_FILE_SIZE / (1024 * 1024)}MB`);
+                    return;
+                }
+                
+                // Generate a unique file ID
+                const fileId = Date.now().toString(36) + Math.random().toString(36).substr(2, 5);
+                
+                // Announce the file to other clients
+                if (isConnected) {
+                    ws.send(JSON.stringify({
+                        type: "file-announce",
+                        fileId: fileId,
+                        fileName: file.name,
+                        fileSize: file.size,
+                        fileType: file.type || "application/octet-stream"
+                    }));
+                    
+                    // Store the file locally
+                    availableFiles[fileId] = {
+                        file: file,
+                        id: fileId,
+                        isLocal: true
+                    };
+                    
+                    // Add to the UI
+                    displayFile(fileId, file.name, true);
+                }
+            });
+            
+            // Function to display a file in the UI
+            function displayFile(fileId, fileName, isLocal) {
+                const fileItem = document.createElement('div');
+                fileItem.className = 'file-item';
+                fileItem.dataset.fileId = fileId;
+                
+                const icon = document.createElement('span');
+                icon.className = 'file-icon';
+                icon.innerHTML = '📄';
+                
+                const name = document.createElement('span');
+                name.textContent = fileName;
+                
+                fileItem.appendChild(icon);
+                fileItem.appendChild(name);
+                
+                if (!isLocal) {
+                    fileItem.addEventListener('click', () => {
+                        requestFile(fileId);
+                    });
+                }
+                
+                fileList.appendChild(fileItem);
+            }
+            
+            // Request a file from another client
+            function requestFile(fileId) {
+                if (!availableFiles[fileId] || availableFiles[fileId].isLocal) return;
+                
+                console.log(`Requesting file: ${fileId} (${availableFiles[fileId].name})`);
+                
+                // Reset any existing data for this file
+                availableFiles[fileId] = {
+                    id: fileId,
+                    name: availableFiles[fileId].name,
+                    size: availableFiles[fileId].size,
+                    type: availableFiles[fileId].type,
+                    chunks: {},
+                    receivedChunks: 0,
+                    totalChunks: 0,
+                    isLocal: false
+                };
+                
+                ws.send(JSON.stringify({
+                    type: "file-request",
+                    fileId: fileId
+                }));
+            }
+            
+            // Handle file announcement from another client
+            function handleFileAnnouncement(msg) {
+                if (!msg.fileId || !msg.fileName) return;
+                
+                // Store file metadata
+                availableFiles[msg.fileId] = {
+                    id: msg.fileId,
+                    name: msg.fileName,
+                    size: msg.fileSize,
+                    type: msg.fileType,
+                    isLocal: false
+                };
+                
+                // Add to UI
+                displayFile(msg.fileId, msg.fileName, false);
+            }
+            
+            // Handle file data from another client
+            async function handleFileData(msg) {
+                if (!msg.fileId || !msg.data) return;
+                
+                // We're receiving a file - collect chunks
+                if (!availableFiles[msg.fileId]) {
+                    availableFiles[msg.fileId] = {
+                        id: msg.fileId,
+                        name: msg.fileName || 'downloaded_file',
+                        chunks: {},  // Change to object instead of array
+                        receivedChunks: 0,
+                        totalChunks: msg.totalChunks || 0,
+                        isLocal: false
+                    };
+                }
+                
+                const fileInfo = availableFiles[msg.fileId];
+                
+                // Check if we already have this chunk
+                if (fileInfo.chunks && fileInfo.chunks[msg.fileChunk] !== undefined) {
+                    console.log(`Already received chunk ${msg.fileChunk} for file ${fileInfo.name}, skipping`);
+                    return;
+                }
+                
+                // Add this chunk
+                let chunkData = msg.data;
+                
+                // Decrypt if needed
+                if (msg.encrypted) {
+                    try {
+                        chunkData = await decryptText(chunkData);
+                        console.log(`Successfully decrypted chunk ${msg.fileChunk} of size ${chunkData.length}`);
+                    } catch (e) {
+                        console.error("Failed to decrypt file chunk:", e);
+                    }
+                }
+                
+                // Make sure we have totalChunks info
+                if (msg.totalChunks) {
+                    fileInfo.totalChunks = parseInt(msg.totalChunks, 10);
+                    console.log(`File has ${fileInfo.totalChunks} total chunks`);
+                }
+                
+                // Make sure chunks is initialized
+                if (!fileInfo.chunks) {
+                    fileInfo.chunks = {};
+                }
+                
+                // Parse chunk index as integer
+                const chunkIndex = parseInt(msg.fileChunk, 10);
+                
+                // Store the chunk
+                fileInfo.chunks[chunkIndex] = chunkData;
+                fileInfo.receivedChunks = Object.keys(fileInfo.chunks).length;
+                
+                console.log(`Received chunk ${chunkIndex + 1}/${fileInfo.totalChunks} for ${fileInfo.name} (total received: ${fileInfo.receivedChunks})`);
+                
+                // If we have all chunks, assemble and download the file
+                if (fileInfo.receivedChunks >= fileInfo.totalChunks) {
+                    console.log(`Received all ${fileInfo.totalChunks} chunks for file ${fileInfo.name}`);
+                    try {
+                        const fileBlob = assembleFile(fileInfo.chunks, fileInfo.type || 'application/octet-stream');
+                        downloadFile(fileBlob, fileInfo.name);
+                        
+                        // Clean up chunks to free memory
+                        delete fileInfo.chunks;
+                    } catch (error) {
+                        console.error("Error assembling or downloading file:", error);
+                    }
+                }
+            }
+            
+            // Send file data to a client that requested it
+            async function sendFile(fileId) {
+                const fileInfo = availableFiles[fileId];
+                if (!fileInfo || !fileInfo.isLocal || !fileInfo.file) {
+                    console.error(`Cannot send file ${fileId}: file not found or not local`);
+                    return;
+                }
+                
+                const file = fileInfo.file;
+                const totalChunks = Math.ceil(file.size / CHUNK_SIZE);
+                console.log(`Sending file ${file.name} (${file.size} bytes) in ${totalChunks} chunks`);
+                
+                // Send file in chunks
+                for (let i = 0; i < totalChunks; i++) {
+                    const start = i * CHUNK_SIZE;
+                    const end = Math.min(start + CHUNK_SIZE, file.size);
+                    const chunk = file.slice(start, end);
+                    
+                    console.log(`Preparing chunk ${i+1}/${totalChunks}, size: ${chunk.size} bytes`);
+                    
+                    // Convert chunk to base64
+                    const fileReader = new FileReader();
+                    await new Promise((resolve) => {
+                        fileReader.onloadend = resolve;
+                        fileReader.readAsDataURL(chunk);
+                    });
+                    
+                    // Extract the base64 data without the prefix
+                    let base64Data = fileReader.result.split(',')[1];
+                    console.log(`Chunk ${i} converted to base64, length: ${base64Data.length}`);
+                    
+                    try {
+                        // Encrypt the chunk
+                        const encryptedData = await encryptText(base64Data);
+                        
+                        // Send the chunk
+                        ws.send(JSON.stringify({
+                            type: "file-data",
+                            fileId: fileId,
+                            fileName: file.name,
+                            fileType: file.type || "application/octet-stream",
+                            fileChunk: i.toString(),  // Ensure it's a string
+                            totalChunks: totalChunks.toString(),  // Ensure it's a string
+                            data: encryptedData,
+                            encrypted: true
+                        }));
+                        
+                        console.log(`Sent chunk ${i+1}/${totalChunks} of file ${file.name}`);
+                    } catch (e) {
+                        console.error(`Error sending chunk ${i}:`, e);
+                        // Try sending unencrypted as fallback
+                        ws.send(JSON.stringify({
+                            type: "file-data",
+                            fileId: fileId,
+                            fileName: file.name,
+                            fileType: file.type || "application/octet-stream",
+                            fileChunk: i.toString(),  // Ensure it's a string
+                            totalChunks: totalChunks.toString(),  // Ensure it's a string
+                            data: base64Data,
+                            encrypted: false
+                        }));
+                    }
+                    
+                    // Small delay to prevent overwhelming the connection
+                    await new Promise(resolve => setTimeout(resolve, 100));
+                }
+                
+                console.log(`Completed sending file ${file.name}`);
+            }
+            
+            // Assemble file chunks into a blob
+            function assembleFile(chunks, mimeType) {
+                // Get all chunks in order
+                const orderedChunks = [];
+                const chunkIndices = Object.keys(chunks).map(Number).sort((a, b) => a - b);
+                const totalChunks = chunkIndices.length;
+                
+                console.log(`Assembling file from ${totalChunks} chunks with indices: ${chunkIndices.join(', ')}`);
+                
+                // Validate that we have all the chunks we need
+                let missingChunks = false;
+                for (let i = 0; i < totalChunks; i++) {
+                    if (!chunkIndices.includes(i)) {
+                        console.error(`Missing chunk at index ${i}`);
+                        missingChunks = true;
+                    }
+                }
+                
+                if (missingChunks) {
+                    console.warn("Some chunks are missing, but attempting to assemble anyway");
+                }
+                
+                // Convert chunks object to ordered array using the sorted indices
+                for (let i = 0; i < chunkIndices.length; i++) {
+                    const chunkIndex = chunkIndices[i];
+                    if (chunks[chunkIndex] === undefined) {
+                        console.error(`Missing chunk ${chunkIndex}`);
+                        continue;
+                    }
+                    
+                    const chunk = chunks[chunkIndex];
+                    console.log(`Adding chunk ${chunkIndex} to ordered array, data length: ${chunk.length || 0}`);
+                    orderedChunks.push(chunk);
+                }
+                
+                // Convert base64 chunks to binary
+                const binaryChunks = orderedChunks.map((chunk, index) => {
+                    try {
+                        console.log(`Converting chunk ${index} to binary, base64 length: ${chunk.length}`);
+                        const binary = atob(chunk);
+                        console.log(`Decoded chunk ${index}, binary length: ${binary.length}`);
+                        return binary;
+                    } catch (e) {
+                        console.error(`Failed to decode base64 chunk ${index}:`, e);
+                        console.log(`Problematic base64 chunk sample: ${chunk.substring(0, 30)}...`);
+                        return '';
+                    }
+                });
+                
+                // Convert to Uint8Array
+                const uint8Chunks = binaryChunks.map(binary => {
+                    const bytes = new Uint8Array(binary.length);
+                    for (let i = 0; i < binary.length; i++) {
+                        bytes[i] = binary.charCodeAt(i);
+                    }
+                    return bytes;
+                });
+                
+                // Assemble the file
+                const fileBlob = new Blob(uint8Chunks, { type: mimeType });
+                return fileBlob;
+            }
+            
+            // Download the assembled file
+            function downloadFile(blob, fileName) {
+                try {
+                    console.log(`Downloading file: ${fileName}, size: ${blob.size} bytes`);
+                    const url = URL.createObjectURL(blob);
+                    const a = document.createElement('a');
+                    a.href = url;
+                    a.download = fileName;
+                    
+                    // Force-trigger download with click()
+                    document.body.appendChild(a);
+                    console.log("Triggering download...");
+                    a.click();
+                    
+                    // Clean up
+                    setTimeout(() => {
+                        document.body.removeChild(a);
+                        URL.revokeObjectURL(url);
+                        console.log("Download link cleaned up");
+                    }, 1000);
+                } catch (error) {
+                    console.error("Error downloading file:", error);
+                }
+            }
     
             function checkActivity() {
                 if (Date.now() - lastActivity > ACTIVITY_TIMEOUT) {

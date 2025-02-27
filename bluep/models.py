@@ -36,7 +36,7 @@ class SessionData(BaseModel):
     # added as an instance attribute after creation
 
 class WebSocketMessage(BaseModel):
-    type: Literal["content", "cursor", "pong", "state", "error"]  # Added state and error
+    type: Literal["content", "cursor", "pong", "state", "error", "file-announce", "file-request", "file-data"]
     data: Optional[str] = None
     x: Optional[int] = None
     y: Optional[int] = None
@@ -45,6 +45,12 @@ class WebSocketMessage(BaseModel):
     error: Optional[str] = None
     encrypted: Optional[bool] = False
     keyId: Optional[str] = None  # Reference to the key used for encryption
+    fileName: Optional[str] = None  # For file operations
+    fileSize: Optional[int] = None  # For file operations
+    fileId: Optional[str] = None  # Unique ID for the file
+    fileType: Optional[str] = None  # MIME type
+    fileChunk: Optional[int] = None  # Chunk number for file transfers
+    totalChunks: Optional[int] = None  # Total chunks for file transfers
 
     @field_validator("data")
     def validate_data(cls, v: Optional[str], info: ValidationInfo) -> str:

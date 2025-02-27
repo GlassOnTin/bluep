@@ -4,7 +4,7 @@ import asyncio
 import logging
 import time
 from dataclasses import dataclass
-from typing import Dict, Any, Optional, Set
+from typing import Dict, Any, Optional, Set, List
 from fastapi import WebSocket, WebSocketDisconnect
 from starlette.websockets import WebSocketState
 
@@ -30,6 +30,7 @@ class WebSocketManager:
         self.timeout = timeout
         self._lock = asyncio.Lock()
         self.ping_interval = 60
+        self.available_files: Dict[str, Dict[str, Any]] = {}  # fileId -> file metadata
 
     async def transition_state(
         self,
@@ -155,6 +156,81 @@ class WebSocketManager:
         # Finally handle disconnections
         for connection in disconnected:
             await self.disconnect(connection, reason="broadcast_error")
+            
+    async def announce_file(self, file_id: str, file_name: str, file_size: int, 
+                         file_type: str, source_websocket: WebSocket) -> None:
+        """Announce a new file available for download to all clients"""
+        # Store file metadata
+        async with self._lock:
+            # Find the source connection info
+            for conn, info in self.active_connections.items():
+                if conn == source_websocket:
+                    source_id = info.session_id
+                    break
+            else:
+                logger.error("Source connection not found")
+                return
+                
+            # Store file metadata
+            self.available_files[file_id] = {
+                "fileName": file_name,
+                "fileSize": file_size,
+                "fileType": file_type,
+                "sourceId": source_id,
+                "timestamp": time.time()
+            }
+        
+        # Broadcast file announcement to all clients
+        await self.broadcast({
+            "type": "file-announce",
+            "fileId": file_id,
+            "fileName": file_name,
+            "fileSize": file_size,
+            "fileType": file_type
+        }, exclude=source_websocket)
+        
+    async def handle_file_request(self, file_id: str, requester: WebSocket) -> None:
+        """Handle a client requesting a file download"""
+        # Check if the file exists
+        if file_id not in self.available_files:
+            await requester.send_json({
+                "type": "error",
+                "error": "File not found"
+            })
+            return
+            
+        # Find the source connection
+        source_websocket = None
+        source_id = self.available_files[file_id]["sourceId"]
+        
+        async with self._lock:
+            for conn, info in self.active_connections.items():
+                if info.session_id == source_id:
+                    source_websocket = conn
+                    break
+        
+        if not source_websocket:
+            # Source client disconnected
+            await requester.send_json({
+                "type": "error",
+                "error": "File source disconnected"
+            })
+            # Clean up this file
+            self.available_files.pop(file_id, None)
+            return
+            
+        # Forward the request to the source
+        try:
+            await source_websocket.send_json({
+                "type": "file-request",
+                "fileId": file_id
+            })
+        except Exception as e:
+            logger.error(f"Error requesting file from source: {e}")
+            await requester.send_json({
+                "type": "error",
+                "error": "Failed to request file from source"
+            })
 
     async def broadcast_client_count(self) -> None:
         try:

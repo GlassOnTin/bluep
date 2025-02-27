@@ -10,7 +10,7 @@ import secrets
 import hashlib
 import base64
 from io import BytesIO
-from typing import Optional, Dict, Any
+from typing import Optional, Dict, Any, Tuple, List, Union
 
 from fastapi import FastAPI, WebSocket, Request, HTTPException, WebSocketDisconnect
 from fastapi.responses import Response, RedirectResponse
@@ -211,6 +211,25 @@ class BlueApp:
                     message_to_broadcast["encrypted"] = True
                     
                     await self.ws_manager.broadcast(message_to_broadcast, exclude=websocket)
+                
+                elif msg.type == "file-announce" and msg.fileName:
+                    # Handle file announcement from client
+                    file_id = msg.fileId or secrets.token_hex(8)
+                    await self.ws_manager.announce_file(
+                        file_id=file_id,
+                        file_name=msg.fileName,
+                        file_size=msg.fileSize or 0,
+                        file_type=msg.fileType or "application/octet-stream",
+                        source_websocket=websocket
+                    )
+                
+                elif msg.type == "file-request" and msg.fileId:
+                    # Handle client requesting a file
+                    await self.ws_manager.handle_file_request(msg.fileId, websocket)
+                
+                elif msg.type == "file-data":
+                    # Forward file data chunks to the requesting client
+                    await self.ws_manager.broadcast(msg.model_dump(exclude_none=True), exclude=websocket)
 
         except WebSocketDisconnect:
             if websocket in self.ws_manager.active_connections:
