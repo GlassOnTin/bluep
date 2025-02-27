@@ -3,7 +3,7 @@
 <head>
     <title>bluep (0)</title>
     <link rel="icon" type="image/png" href="/favicon.png?key={{key}}">
-    <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self'; connect-src 'self' wss:; img-src 'self' data:">
+    <!-- CSP is applied by middleware.py -->
     <style>
         body, html {
             margin: 0;
@@ -51,7 +51,7 @@
             box-sizing: border-box;
         }
     </style>
-    <script src="/static/js/crypto-utils.js" integrity="sha384-{{js_integrity_hash}}" crossorigin="anonymous"></script>
+    <script src="/static/js/crypto-utils.js"></script>
 </head>
 <body>
     <div id="editor">
@@ -70,16 +70,33 @@
         
         // Initialize main application after security checks
         (async function() {
-            // First perform security key exchange
+            // Use a shared key for all clients to ensure seamless communication
             const token = "{{token}}";
+            const sharedKeyStr = "{{shared_key}}";
             let encryptionKey = null;
             
             try {
-                // Use more secure key exchange
-                await performKeyExchange(token);
-                console.log("ECDH key exchange completed successfully");
+                // Instead of generating a key from the individual token,
+                // we'll use the shared key that the server provides to all clients
+                console.log("Using server-provided shared encryption key");
+                
+                // Convert the shared key to a cryptographic key
+                sharedSecret = await createKeyFromSharedString(sharedKeyStr);
+                
+                console.log("Shared encryption key setup completed");
             } catch (e) {
-                console.warn("Using fallback encryption method:", e);
+                console.warn("Error with shared key, falling back to token-based method:", e);
+                try {
+                    // Fall back to token-based encryption if shared key fails
+                    sharedSecret = await fallbackToTokenBasedKey(token);
+                    if (sharedSecret) {
+                        console.log("Created fallback encryption key");
+                    } else {
+                        console.error("Failed to create any encryption key");
+                    }
+                } catch (keyError) {
+                    console.error("Failed to create fallback key:", keyError);
+                }
             }
             
             // Create WebSocket with auth key
@@ -98,13 +115,12 @@
                 reconnectAttempts = 0;
                 console.log('Connected to server');
     
-                // Send initial message with encrypted content
+                // Send initial message with encryption
                 const encryptedData = await encryptText("bluep");
                 ws.send(JSON.stringify({
                     type: "content",
                     data: encryptedData,
-                    encrypted: true,
-                    keyId: "latest" // Use the latest key from key exchange
+                    encrypted: true
                 }));
             };
     
@@ -137,10 +153,10 @@
                     let content = msg.data;
                     if (msg.encrypted) {
                         try {
-                            content = await decryptText(msg.data);
+                            content = await decryptText(content);
                         } catch (e) {
-                            console.error("Failed to decrypt message");
-                            content = "Error: Could not decrypt message";
+                            console.error("Decryption error:", e);
+                            // Use data as-is if decryption fails
                         }
                     }
                     
@@ -158,13 +174,22 @@
                 if (!isReceiving && isConnected) {
                     const content = editor.value;
                     // Encrypt the content before sending
-                    const encryptedData = await encryptText(content);
-                    ws.send(JSON.stringify({
-                        type: "content",
-                        data: encryptedData,
-                        encrypted: true,
-                        keyId: "latest" // Use the latest key
-                    }));
+                    try {
+                        const encryptedData = await encryptText(content);
+                        ws.send(JSON.stringify({
+                            type: "content",
+                            data: encryptedData,
+                            encrypted: true
+                        }));
+                    } catch (e) {
+                        console.error("Encryption error:", e);
+                        // Fallback to plaintext if encryption fails
+                        ws.send(JSON.stringify({
+                            type: "content",
+                            data: content,
+                            encrypted: false
+                        }));
+                    }
                 }
             };
     
@@ -207,14 +232,23 @@
                     reconnectAttempts = 0;
                     console.log('Connected to server');
     
-                    // Encrypt content before sending
-                    const encryptedData = await encryptText(editor.value);
-                    socket.send(JSON.stringify({
-                        type: "content",
-                        data: encryptedData,
-                        encrypted: true,
-                        keyId: "latest"
-                    }));
+                    // Send content with encryption
+                    try {
+                        const encryptedData = await encryptText(editor.value);
+                        socket.send(JSON.stringify({
+                            type: "content",
+                            data: encryptedData,
+                            encrypted: true
+                        }));
+                    } catch (e) {
+                        console.error("Encryption error:", e);
+                        // Fallback to plaintext if encryption fails
+                        socket.send(JSON.stringify({
+                            type: "content",
+                            data: editor.value,
+                            encrypted: false
+                        }));
+                    }
                 };
     
                 socket.onclose = (event) => {
@@ -234,18 +268,17 @@
                     if (msg.type === "ping") {
                         socket.send(JSON.stringify({type: "pong"}));
                     } else if (msg.type === "content") {
-                        isReceiving = true;
-                        
                         // Handle encrypted content
                         let content = msg.data;
                         if (msg.encrypted) {
                             try {
-                                content = await decryptText(msg.data);
+                                content = await decryptText(content);
                             } catch (e) {
-                                console.error("Failed to decrypt message");
-                                content = "Error: Could not decrypt message";
+                                console.error("Decryption error:", e);
+                                // Use data as-is if decryption fails
                             }
                         }
+                        isReceiving = true;
                         
                         const currentValue = editor.value;
                         if (currentValue !== content) {

@@ -25,6 +25,8 @@ class SessionManager:
         self.cookie_name = cookie_name
         self.cookie_max_age = cookie_max_age
         self.refresh_threshold = refresh_threshold
+        # Create a shared encryption key for all sessions
+        self.shared_encryption_key = secrets.token_urlsafe(32)
 
     def create_websocket_token(self, session_id: str) -> str:
         token = secrets.token_urlsafe(32)

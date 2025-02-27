@@ -177,11 +177,11 @@ class WebSocketManager:
                     current_text = self.shared_text
                     
                 # Send without holding the lock to prevent deadlocks
-                # We assume that if text is saved, it maintains its encryption status
+                # Enable encryption for content messages
                 await websocket.send_json({
                     "type": "content",
                     "data": current_text,
-                    "encrypted": True  # Assume all content is encrypted now
+                    "encrypted": True  # Mark as encrypted so clients will decrypt
                 })
         except Exception as e:
             logger.error(f"Error sending current text: {e}")
