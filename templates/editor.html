@@ -3,6 +3,7 @@
 <head>
     <title>bluep (0)</title>
     <link rel="icon" type="image/png" href="/favicon.png?key={{key}}">
+    <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self'; connect-src 'self' wss:; img-src 'self' data:">
     <style>
         body, html {
             margin: 0;
@@ -50,270 +51,85 @@
             box-sizing: border-box;
         }
     </style>
+    <script src="/static/js/crypto-utils.js" integrity="sha384-{{js_integrity_hash}}" crossorigin="anonymous"></script>
 </head>
 <body>
     <div id="editor">
         <textarea autofocus></textarea>
     </div>
     <script>
-        // Create WebSocket with auth key
-        const wsUrl = `wss://${window.location.host}/ws?token={{token}}`;
-        let ws = new WebSocket(wsUrl);
-
-        // Track connection state
-        let isConnected = false;
-        let reconnectAttempts = 0;
-        const MAX_RECONNECT_ATTEMPTS = 5;
-        const editor = document.querySelector('#editor textarea');
-        let isReceiving = false;
+        // Security: Verify the connection and check for tampering
+        document.addEventListener('DOMContentLoaded', function() {
+            // Verify certificate and detect tampering
+            verifyConnection("{{cert_fingerprint}}");
+            detectExtensionTampering({{script_length}});
+            
+            // Check security verification every minute
+            setInterval(() => verifyConnection("{{cert_fingerprint}}"), 60000);
+        });
         
-        // Encryption key - derived from the token plus a fixed salt
-        // In a real production system, you would use a more robust key exchange mechanism
-        const encryptionKey = "{{token}}salt_bluep_secure";
-        
-        // Simple encryption/decryption functions using AES from SubtleCrypto
-        async function encryptText(text) {
-            const encoder = new TextEncoder();
-            const data = encoder.encode(text);
+        // Initialize main application after security checks
+        (async function() {
+            // First perform security key exchange
+            const token = "{{token}}";
+            let encryptionKey = null;
             
-            // Create a key from the encryption key string
-            const keyMaterial = await window.crypto.subtle.importKey(
-                "raw",
-                encoder.encode(encryptionKey),
-                { name: "PBKDF2" },
-                false,
-                ["deriveBits", "deriveKey"]
-            );
-            
-            // Derive an AES-GCM key
-            const key = await window.crypto.subtle.deriveKey(
-                {
-                    name: "PBKDF2",
-                    salt: encoder.encode("bluep_salt"),
-                    iterations: 100000,
-                    hash: "SHA-256"
-                },
-                keyMaterial,
-                { name: "AES-GCM", length: 256 },
-                false,
-                ["encrypt", "decrypt"]
-            );
-            
-            // Generate an IV
-            const iv = window.crypto.getRandomValues(new Uint8Array(12));
-            
-            // Encrypt the data
-            const encryptedContent = await window.crypto.subtle.encrypt(
-                {
-                    name: "AES-GCM",
-                    iv: iv
-                },
-                key,
-                data
-            );
-            
-            // Combine IV and encrypted content
-            const encryptedBuffer = new Uint8Array(iv.byteLength + encryptedContent.byteLength);
-            encryptedBuffer.set(iv, 0);
-            encryptedBuffer.set(new Uint8Array(encryptedContent), iv.byteLength);
-            
-            // Convert to base64 for transmission
-            return btoa(String.fromCharCode.apply(null, encryptedBuffer));
-        }
-        
-        async function decryptText(encryptedText) {
             try {
-                const encoder = new TextEncoder();
-                
-                // Convert from base64
-                const encryptedBuffer = Uint8Array.from(atob(encryptedText), c => c.charCodeAt(0));
-                
-                // Extract IV and encrypted content
-                const iv = encryptedBuffer.slice(0, 12);
-                const encryptedContent = encryptedBuffer.slice(12);
-                
-                // Create a key from the encryption key string
-                const keyMaterial = await window.crypto.subtle.importKey(
-                    "raw",
-                    encoder.encode(encryptionKey),
-                    { name: "PBKDF2" },
-                    false,
-                    ["deriveBits", "deriveKey"]
-                );
-                
-                // Derive an AES-GCM key
-                const key = await window.crypto.subtle.deriveKey(
-                    {
-                        name: "PBKDF2",
-                        salt: encoder.encode("bluep_salt"),
-                        iterations: 100000,
-                        hash: "SHA-256"
-                    },
-                    keyMaterial,
-                    { name: "AES-GCM", length: 256 },
-                    false,
-                    ["encrypt", "decrypt"]
-                );
-                
-                // Decrypt the data
-                const decryptedContent = await window.crypto.subtle.decrypt(
-                    {
-                        name: "AES-GCM",
-                        iv: iv
-                    },
-                    key,
-                    encryptedContent
-                );
-                
-                // Convert to text
-                return new TextDecoder().decode(decryptedContent);
+                // Use more secure key exchange
+                await performKeyExchange(token);
+                console.log("ECDH key exchange completed successfully");
             } catch (e) {
-                console.error("Decryption error:", e);
-                return "Error decrypting message";
+                console.warn("Using fallback encryption method:", e);
             }
-        }
-
-        ws.onopen = async () => {
-            isConnected = true;
-            reconnectAttempts = 0;
-            console.log('Connected to server');
-
-            // Send initial message with encrypted content
-            const encryptedData = await encryptText("bluep");
-            ws.send(JSON.stringify({
-                type: "content",
-                data: encryptedData,
-                encrypted: true
-            }));
-        };
-
-        ws.onclose = (event) => {
-            console.log('WebSocket closed:', event.code, event.reason);
-            isConnected = false;
-            if (event.code === 403) {
-                handleTOTPExpiry();
-            } else {
-                handleDisconnect();
-            }
-        };
-
-        ws.onerror = (error) => {
-            console.error('WebSocket error:', error);
-        };
-
-        // Add message handler
-        ws.onmessage = async (event) => {
-            // Don't log the full message content as it may contain sensitive data
-            console.log('Received message type:', JSON.parse(event.data).type);
             
-            const msg = JSON.parse(event.data);
-            if (msg.type === "ping") {
-                console.log('Received ping, sending pong');
-                ws.send(JSON.stringify({type: "pong"}));
-            } else if (msg.type === "content") {
-                isReceiving = true;
-                
-                // Handle encrypted content
-                let content = msg.data;
-                if (msg.encrypted) {
-                    try {
-                        content = await decryptText(msg.data);
-                    } catch (e) {
-                        console.error("Failed to decrypt message:", e);
-                        content = "Error: Could not decrypt message";
-                    }
-                }
-                
-                const currentValue = editor.value;
-                if (currentValue !== content) {
-                    editor.value = content;
-                }
-                isReceiving = false;
-            } else if (msg.type === "clients") {
-                // Don't log client IP information, just update the counter
-                document.title = `bluep (${msg.count})`;
-            }
-        };
-
-        editor.oninput = async () => {
-            if (!isReceiving && isConnected) {
-                const content = editor.value;
-                // Encrypt the content before sending
-                const encryptedData = await encryptText(content);
-                ws.send(JSON.stringify({
-                    type: "content",
-                    data: encryptedData,
-                    encrypted: true
-                }));
-            }
-        };
-
-        // Activity monitoring
-        let lastActivity = Date.now();
-        const ACTIVITY_TIMEOUT = 30 * 60 * 1000; // milliseconds
-
-        document.addEventListener('mousemove', () => lastActivity = Date.now());
-        document.addEventListener('keypress', () => lastActivity = Date.now());
-
-        function checkActivity() {
-            if (Date.now() - lastActivity > ACTIVITY_TIMEOUT) {
-                window.location.reload(); // Refresh page if inactive
-            }
-        }
-
-        function handleTOTPExpiry() {
-            if (ws.readyState === WebSocket.CLOSED) {
-                window.location.href = '/login';
-            }
-        }
-
-        function handleDisconnect() {
-            if (reconnectAttempts < MAX_RECONNECT_ATTEMPTS) {
-                reconnectAttempts++;
-                setTimeout(() => {
-                    if (ws.readyState === WebSocket.CLOSED) {
-                        ws = new WebSocket(wsUrl);
-                        initializeWebSocket(ws);
-                    }
-                }, 1000 * reconnectAttempts);
-            } else {
-                alert('Connection lost. Please refresh the page.');
-            }
-        }
-
-        function initializeWebSocket(socket) {
-            socket.onopen = async () => {
+            // Create WebSocket with auth key
+            const wsUrl = `wss://${window.location.host}/ws?token=${token}`;
+            let ws = new WebSocket(wsUrl);
+            
+            // Track connection state
+            let isConnected = false;
+            let reconnectAttempts = 0;
+            const MAX_RECONNECT_ATTEMPTS = 5;
+            const editor = document.querySelector('#editor textarea');
+            let isReceiving = false;
+            
+            ws.onopen = async () => {
                 isConnected = true;
                 reconnectAttempts = 0;
                 console.log('Connected to server');
-
-                // Encrypt content before sending
-                const encryptedData = await encryptText(editor.value);
-                socket.send(JSON.stringify({
+    
+                // Send initial message with encrypted content
+                const encryptedData = await encryptText("bluep");
+                ws.send(JSON.stringify({
                     type: "content",
                     data: encryptedData,
-                    encrypted: true
+                    encrypted: true,
+                    keyId: "latest" // Use the latest key from key exchange
                 }));
             };
-
-            socket.onclose = (event) => {
+    
+            ws.onclose = (event) => {
                 console.log('WebSocket closed:', event.code, event.reason);
                 isConnected = false;
-                handleDisconnect();
+                if (event.code === 403) {
+                    handleTOTPExpiry();
+                } else {
+                    handleDisconnect();
+                }
             };
-
-            socket.onerror = (error) => {
+    
+            ws.onerror = (error) => {
                 console.error('WebSocket error:', error);
             };
-
-            socket.onmessage = async (event) => {
-                // Don't log the full message content as it may contain sensitive data
-                console.log('Received message type:', JSON.parse(event.data).type);
-                
+    
+            // Add message handler
+            ws.onmessage = async (event) => {
+                // Don't log sensitive data
                 const msg = JSON.parse(event.data);
+                console.log('Received message type:', msg.type);
+                
                 if (msg.type === "ping") {
-                    console.log('Received ping, sending pong');
-                    socket.send(JSON.stringify({type: "pong"}));
+                    ws.send(JSON.stringify({type: "pong"}));
                 } else if (msg.type === "content") {
                     isReceiving = true;
                     
@@ -323,7 +139,7 @@
                         try {
                             content = await decryptText(msg.data);
                         } catch (e) {
-                            console.error("Failed to decrypt message:", e);
+                            console.error("Failed to decrypt message");
                             content = "Error: Could not decrypt message";
                         }
                     }
@@ -334,14 +150,117 @@
                     }
                     isReceiving = false;
                 } else if (msg.type === "clients") {
-                    // Don't log client IP information, just update the counter
                     document.title = `bluep (${msg.count})`;
                 }
             };
-        }
-
-        // Regular checks
-        setInterval(checkActivity, 60000); // Check activity every minute
+    
+            editor.oninput = async () => {
+                if (!isReceiving && isConnected) {
+                    const content = editor.value;
+                    // Encrypt the content before sending
+                    const encryptedData = await encryptText(content);
+                    ws.send(JSON.stringify({
+                        type: "content",
+                        data: encryptedData,
+                        encrypted: true,
+                        keyId: "latest" // Use the latest key
+                    }));
+                }
+            };
+    
+            // Activity monitoring
+            let lastActivity = Date.now();
+            const ACTIVITY_TIMEOUT = 30 * 60 * 1000; // milliseconds
+    
+            document.addEventListener('mousemove', () => lastActivity = Date.now());
+            document.addEventListener('keypress', () => lastActivity = Date.now());
+    
+            function checkActivity() {
+                if (Date.now() - lastActivity > ACTIVITY_TIMEOUT) {
+                    window.location.reload(); // Refresh page if inactive
+                }
+            }
+    
+            function handleTOTPExpiry() {
+                if (ws.readyState === WebSocket.CLOSED) {
+                    window.location.href = '/login';
+                }
+            }
+    
+            function handleDisconnect() {
+                if (reconnectAttempts < MAX_RECONNECT_ATTEMPTS) {
+                    reconnectAttempts++;
+                    setTimeout(() => {
+                        if (ws.readyState === WebSocket.CLOSED) {
+                            ws = new WebSocket(wsUrl);
+                            initializeWebSocket(ws);
+                        }
+                    }, 1000 * reconnectAttempts);
+                } else {
+                    alert('Connection lost. Please refresh the page.');
+                }
+            }
+    
+            function initializeWebSocket(socket) {
+                socket.onopen = async () => {
+                    isConnected = true;
+                    reconnectAttempts = 0;
+                    console.log('Connected to server');
+    
+                    // Encrypt content before sending
+                    const encryptedData = await encryptText(editor.value);
+                    socket.send(JSON.stringify({
+                        type: "content",
+                        data: encryptedData,
+                        encrypted: true,
+                        keyId: "latest"
+                    }));
+                };
+    
+                socket.onclose = (event) => {
+                    console.log('WebSocket closed:', event.code, event.reason);
+                    isConnected = false;
+                    handleDisconnect();
+                };
+    
+                socket.onerror = (error) => {
+                    console.error('WebSocket error:', error);
+                };
+    
+                socket.onmessage = async (event) => {
+                    const msg = JSON.parse(event.data);
+                    console.log('Received message type:', msg.type);
+                    
+                    if (msg.type === "ping") {
+                        socket.send(JSON.stringify({type: "pong"}));
+                    } else if (msg.type === "content") {
+                        isReceiving = true;
+                        
+                        // Handle encrypted content
+                        let content = msg.data;
+                        if (msg.encrypted) {
+                            try {
+                                content = await decryptText(msg.data);
+                            } catch (e) {
+                                console.error("Failed to decrypt message");
+                                content = "Error: Could not decrypt message";
+                            }
+                        }
+                        
+                        const currentValue = editor.value;
+                        if (currentValue !== content) {
+                            editor.value = content;
+                        }
+                        isReceiving = false;
+                    } else if (msg.type === "clients") {
+                        document.title = `bluep (${msg.count})`;
+                    }
+                };
+            }
+    
+            // Regular checks
+            setInterval(checkActivity, 60000); // Check activity every minute
+        })();
     </script>
 </body>
 </html>

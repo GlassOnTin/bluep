@@ -6,8 +6,12 @@ CORS configuration, trusted hosts, rate limiting, and security headers.
 
 import json
 import time
+import glob
+import os
+import base64
+import hashlib
 from collections import defaultdict
-from typing import DefaultDict, List, Any, Callable
+from typing import DefaultDict, List, Any, Callable, Dict
 
 from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
@@ -39,28 +43,54 @@ def configure_security(app: FastAPI) -> None:
 
     app.add_middleware(RateLimitMiddleware, rate_limit=100, window=60)
 
+    # Generate integrity hashes for JS and CSS assets
+    js_files: Dict[str, str] = {}
+    
+    for script_path in glob.glob("static/js/*.js"):
+        try:
+            with open(script_path, "rb") as f:
+                content = f.read()
+                # Generate base64-encoded SHA-384 hash
+                digest = base64.b64encode(hashlib.sha384(content).digest()).decode()
+                basename = os.path.basename(script_path)
+                js_files[basename] = f"sha384-{digest}"
+        except Exception as e:
+            print(f"Error generating hash for {script_path}: {e}")
+    
     @app.middleware("http")
     async def add_security_headers(request: Request, call_next: Callable) -> Response:
         """Add security headers to response."""
         response = await call_next(request)
+        
         # Security headers
         response.headers["X-Content-Type-Options"] = "nosniff"
         response.headers["X-Frame-Options"] = "DENY"
         response.headers["X-XSS-Protection"] = "1; mode=block"
         response.headers["Referrer-Policy"] = "strict-origin-when-cross-origin"
         response.headers["Strict-Transport-Security"] = "max-age=31536000; includeSubDomains"
-        response.headers["Permissions-Policy"] = "camera=(), microphone=(), geolocation=()"
-        response.headers["Content-Security-Policy"] = (
-            "default-src 'self'; "
-            "script-src 'self' 'unsafe-inline'; "
-            "style-src 'self' 'unsafe-inline'; "
-            "connect-src 'self' wss:; "
-            "img-src 'self' data:; "
-            "frame-ancestors 'none'; "
-            "form-action 'self'; "
-            "base-uri 'self'; "
+        response.headers["Permissions-Policy"] = "camera=(), microphone=(), geolocation=(), document-domain=()"
+        
+        # Build CSP with script hashes
+        script_hashes = " ".join([f"'{hash_value}'" for hash_value in js_files.values()])
+        script_src = f"'self' {script_hashes}" if script_hashes else "'self'"
+        
+        csp_parts = [
+            "default-src 'self'",
+            f"script-src {script_src}",  # Include script hashes
+            "style-src 'self' 'unsafe-inline'",
+            "connect-src 'self' wss:",
+            "img-src 'self' data:",
+            "frame-ancestors 'none'",
+            "form-action 'self'",
+            "base-uri 'self'",
             "object-src 'none'"
-        )
+        ]
+        
+        response.headers["Content-Security-Policy"] = "; ".join(csp_parts)
+        
+        # Add reporting endpoint for CSP violations
+        response.headers["Report-To"] = '{"group":"csp-endpoint","max_age":10886400,"endpoints":[{"url":"/csp-report"}]}'
+        
         return response
 
 
