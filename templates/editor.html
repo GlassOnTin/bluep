@@ -217,15 +217,22 @@
                 } else if (msg.type === "content") {
                     isReceiving = true;
                     
-                    // Handle encrypted content
+                    // All content must be encrypted
                     let content = msg.data;
                     if (msg.encrypted) {
                         try {
                             content = await decryptText(content);
                         } catch (e) {
                             console.error("Decryption error:", e);
-                            // Use data as-is if decryption fails
+                            // Reject content that can't be decrypted
+                            isReceiving = false;
+                            return;
                         }
+                    } else {
+                        // Reject unencrypted content for security
+                        console.error("Rejected unencrypted content for security");
+                        isReceiving = false;
+                        return;
                     }
                     
                     const currentValue = editor.value;
@@ -255,7 +262,7 @@
             editor.oninput = async () => {
                 if (!isReceiving && isConnected) {
                     const content = editor.value;
-                    // Encrypt the content before sending
+                    // Always use encryption - no fallback to plaintext
                     try {
                         const encryptedData = await encryptText(content);
                         ws.send(JSON.stringify({
@@ -265,12 +272,8 @@
                         }));
                     } catch (e) {
                         console.error("Encryption error:", e);
-                        // Fallback to plaintext if encryption fails
-                        ws.send(JSON.stringify({
-                            type: "content",
-                            data: content,
-                            encrypted: false
-                        }));
+                        // Don't send unencrypted data
+                        console.error("Message not sent due to encryption failure");
                     }
                 }
             };
@@ -446,14 +449,20 @@
                 // Add this chunk
                 let chunkData = msg.data;
                 
-                // Decrypt if needed
+                // Decrypt the chunk - all data must be encrypted
                 if (msg.encrypted) {
                     try {
                         chunkData = await decryptText(chunkData);
                         console.log(`Successfully decrypted chunk ${msg.fileChunk} of size ${chunkData.length}`);
                     } catch (e) {
                         console.error("Failed to decrypt file chunk:", e);
+                        // Reject chunks that can't be decrypted
+                        return;
                     }
+                } else {
+                    // Reject unencrypted chunks for security
+                    console.error("Rejected unencrypted file chunk for security");
+                    return;
                 }
                 
                 // Make sure we have totalChunks info
@@ -541,17 +550,9 @@
                         console.log(`Sent chunk ${i+1}/${totalChunks} of file ${file.name}`);
                     } catch (e) {
                         console.error(`Error sending chunk ${i}:`, e);
-                        // Try sending unencrypted as fallback
-                        ws.send(JSON.stringify({
-                            type: "file-data",
-                            fileId: fileId,
-                            fileName: file.name,
-                            fileType: file.type || "application/octet-stream",
-                            fileChunk: i.toString(),  // Ensure it's a string
-                            totalChunks: totalChunks.toString(),  // Ensure it's a string
-                            data: base64Data,
-                            encrypted: false
-                        }));
+                        // Don't send unencrypted data - abort the file transfer
+                        console.error("File chunk sending aborted due to encryption failure");
+                        return; // Stop the file sending process
                     }
                     
                     // Small delay to prevent overwhelming the connection
@@ -681,7 +682,7 @@
                     reconnectAttempts = 0;
                     console.log('Connected to server');
     
-                    // Send content with encryption
+                    // Always use encryption - no fallback to plaintext
                     try {
                         const encryptedData = await encryptText(editor.value);
                         socket.send(JSON.stringify({
@@ -691,12 +692,8 @@
                         }));
                     } catch (e) {
                         console.error("Encryption error:", e);
-                        // Fallback to plaintext if encryption fails
-                        socket.send(JSON.stringify({
-                            type: "content",
-                            data: editor.value,
-                            encrypted: false
-                        }));
+                        // Don't send unencrypted data
+                        console.error("Message not sent due to encryption failure");
                     }
                 };
     
@@ -717,15 +714,20 @@
                     if (msg.type === "ping") {
                         socket.send(JSON.stringify({type: "pong"}));
                     } else if (msg.type === "content") {
-                        // Handle encrypted content
+                        // All content must be encrypted
                         let content = msg.data;
                         if (msg.encrypted) {
                             try {
                                 content = await decryptText(content);
                             } catch (e) {
                                 console.error("Decryption error:", e);
-                                // Use data as-is if decryption fails
+                                // Reject content that can't be decrypted
+                                return;
                             }
+                        } else {
+                            // Reject unencrypted content for security
+                            console.error("Rejected unencrypted content for security");
+                            return;
                         }
                         isReceiving = true;
                         

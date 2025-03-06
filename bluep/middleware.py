@@ -68,7 +68,7 @@ def configure_security(app: FastAPI) -> None:
         response.headers["X-XSS-Protection"] = "1; mode=block"
         response.headers["Referrer-Policy"] = "strict-origin-when-cross-origin"
         response.headers["Strict-Transport-Security"] = "max-age=31536000; includeSubDomains"
-        response.headers["Permissions-Policy"] = "camera=(), microphone=(), geolocation=()"
+        response.headers["Permissions-Policy"] = "camera=(), microphone=(), geolocation=(), document-domain=()"
         
         # For CSP, when hashes are present, unsafe-inline is ignored
         # Let's remove the integrity hashes and just use unsafe-inline

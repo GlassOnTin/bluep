@@ -142,20 +142,9 @@ async function createKeyFromSharedString(sharedKeyStr) {
     const encoder = new TextEncoder();
     const keyData = encoder.encode(sharedKeyStr);
     
-    // Import the key material directly if possible
     try {
-        // Try to create a key directly from the shared string
-        return await window.crypto.subtle.importKey(
-            "raw",
-            keyData.slice(0, 32), // Use first 32 bytes for AES-256
-            { name: "AES-GCM" },
-            false,
-            ["encrypt", "decrypt"]
-        );
-    } catch (e) {
-        console.warn("Direct key import failed, trying PBKDF2:", e);
-        
-        // If direct import fails, try with PBKDF2
+        // Use HKDF (Hash-based Key Derivation Function) for better key derivation
+        // First import the source key material
         const keyMaterial = await window.crypto.subtle.importKey(
             "raw",
             keyData,
@@ -164,12 +153,12 @@ async function createKeyFromSharedString(sharedKeyStr) {
             ["deriveBits", "deriveKey"]
         );
         
-        // Derive a key with minimal iterations since this is just for normalizing key material
+        // Use PBKDF2 with stronger parameters
         return await window.crypto.subtle.deriveKey(
             {
                 name: "PBKDF2",
-                salt: encoder.encode("bluep_shared_salt"),
-                iterations: 1, // Just one iteration since we already have good entropy
+                salt: encoder.encode("bluep_shared_key_derivation"),
+                iterations: 100000, // Use high iteration count for better security
                 hash: "SHA-256"
             },
             keyMaterial,
@@ -177,6 +166,9 @@ async function createKeyFromSharedString(sharedKeyStr) {
             false,
             ["encrypt", "decrypt"]
         );
+    } catch (e) {
+        console.error("Key derivation failed:", e);
+        throw new Error("Key derivation failed: " + e.message);
     }
 }
 
@@ -212,28 +204,39 @@ async function generateKeyFromToken(token) {
 }
 
 /**
- * Fallback to a simpler token-based key derivation if key exchange fails
- * This uses a very simple algorithm that's more likely to work in all browsers
+ * Token-based key derivation with stronger security properties
+ * This provides a more secure alternative if the primary key exchange fails
  */
 async function fallbackToTokenBasedKey(token) {
-    console.log("Using fallback key generation method");
+    console.log("Using token-based key generation method");
     try {
         const encoder = new TextEncoder();
-        // Use simple algorithm that should work everywhere
-        const keyData = encoder.encode(token.repeat(2) + "bluep_fallback");
         
-        // Import as raw key (minimal derivation)
-        return await window.crypto.subtle.importKey(
+        // Import the token as PBKDF2 key material
+        const keyMaterial = await window.crypto.subtle.importKey(
             "raw",
-            keyData.slice(0, 32), // Use first 32 bytes for key
-            { name: "AES-GCM" },
+            encoder.encode(token),
+            { name: "PBKDF2" },
+            false,
+            ["deriveBits", "deriveKey"]
+        );
+        
+        // Derive a key with stronger parameters (100,000 iterations)
+        return await window.crypto.subtle.deriveKey(
+            {
+                name: "PBKDF2",
+                salt: encoder.encode("bluep_secure_salt_v3"),
+                iterations: 100000, // Increased for better security
+                hash: "SHA-256"
+            },
+            keyMaterial,
+            { name: "AES-GCM", length: 256 },
             false,
             ["encrypt", "decrypt"]
         );
     } catch (e) {
-        console.error("Even fallback key generation failed:", e);
-        // Return null - encryption will fallback to base64
-        return null;
+        console.error("Token-based key generation failed:", e);
+        throw new Error("Key generation failed: " + e.message);
     }
 }
 
@@ -273,10 +276,9 @@ async function encryptText(text, key) {
         // Use the provided key or the shared secret
         const encryptionKey = key || sharedSecret;
         if (!encryptionKey) {
-            // Provide a fallback for initial connection
-            console.warn("No encryption key available - using plaintext fallback");
-            console.log("Text converted to base64:", text.substring(0, 10) + "...");
-            return btoa(text); // Simple base64 encoding as fallback
+            // No fallback - encryption is required
+            console.error("No encryption key available - cannot proceed");
+            throw new Error("Encryption key missing");
         }
         
         const encoder = new TextEncoder();
@@ -285,11 +287,13 @@ async function encryptText(text, key) {
         // Generate an IV
         const iv = window.crypto.getRandomValues(new Uint8Array(12));
         
-        // Encrypt the data
+        // Encrypt the data with authentication info
         const encryptedContent = await window.crypto.subtle.encrypt(
             {
                 name: "AES-GCM",
-                iv: iv
+                iv: iv,
+                // Add additional authenticated data for integrity verification
+                additionalData: encoder.encode("bluep_secure")
             },
             encryptionKey,
             data
@@ -306,9 +310,7 @@ async function encryptText(text, key) {
         return result;
     } catch (e) {
         console.error("Encryption error:", e);
-        // Provide a fallback on error
-        console.log("Falling back to base64 encoding for:", text.substring(0, 10) + "...");
-        return btoa(text);
+        throw new Error("Encryption failed: " + e.message);
     }
 }
 
@@ -320,56 +322,37 @@ async function decryptText(encryptedText, key) {
         // Use the provided key or the shared secret
         const decryptionKey = key || sharedSecret;
         if (!decryptionKey) {
-            console.warn("No decryption key available - using plaintext fallback");
-            // Try to decode as simple base64
-            try {
-                const result = atob(encryptedText);
-                console.log("Successfully base64 decoded as fallback");
-                return result;
-            } catch (e) {
-                console.error("Failed to base64 decode fallback:", e);
-                return encryptedText; // Return as-is if not valid base64
-            }
+            console.error("No decryption key available - cannot proceed");
+            throw new Error("Decryption key missing");
         }
         
-        try {
-            // Convert from base64
-            const encryptedBuffer = Uint8Array.from(atob(encryptedText), c => c.charCodeAt(0));
-            
-            // Extract IV and encrypted content
-            const iv = encryptedBuffer.slice(0, 12);
-            const encryptedContent = encryptedBuffer.slice(12);
-            
-            // Decrypt the data
-            const decryptedContent = await window.crypto.subtle.decrypt(
-                {
-                    name: "AES-GCM",
-                    iv: iv
-                },
-                decryptionKey,
-                encryptedContent
-            );
-            
-            // Convert to text
-            const result = new TextDecoder().decode(decryptedContent);
-            console.log("Successfully decrypted text with AES-GCM");
-            return result;
-        } catch (innerError) {
-            // If decryption fails, try to interpret as simple base64
-            console.warn("Decryption failed, attempting base64 decode fallback:", innerError);
-            try {
-                const result = atob(encryptedText);
-                console.log("Successfully base64 decoded as fallback after AES failure");
-                return result;
-            } catch (e) {
-                console.error("All decryption methods failed", e);
-                return encryptedText; // Return as-is if not valid base64
-            }
-        }
+        // Convert from base64
+        const encryptedBuffer = Uint8Array.from(atob(encryptedText), c => c.charCodeAt(0));
+        
+        // Extract IV and encrypted content
+        const iv = encryptedBuffer.slice(0, 12);
+        const encryptedContent = encryptedBuffer.slice(12);
+        
+        const encoder = new TextEncoder();
+        
+        // Decrypt the data with the same authentication info used in encryption
+        const decryptedContent = await window.crypto.subtle.decrypt(
+            {
+                name: "AES-GCM",
+                iv: iv,
+                additionalData: encoder.encode("bluep_secure")
+            },
+            decryptionKey,
+            encryptedContent
+        );
+        
+        // Convert to text
+        const result = new TextDecoder().decode(decryptedContent);
+        console.log("Successfully decrypted text with AES-GCM");
+        return result;
     } catch (e) {
         console.error("Decryption error:", e);
-        // If all else fails, return the original text
-        return encryptedText;
+        throw new Error("Decryption failed: " + e.message);
     }
 }
 
@@ -379,11 +362,25 @@ async function decryptText(encryptedText, key) {
 function verifyConnection(certFingerprint) {
     // Check for TLS interception indicators
     if (window.navigator.webdriver) {
-        console.warn("Automated browser detected");
+        console.warn("Automated browser detected - potentially insecure environment");
+        alert("Security warning: automated browser detected");
+        window.location.href = '/login';
         return false;
     }
     
-    // Certificate verification using fetch
+    // Check for debugger
+    if (window.devtools && window.devtools.isOpen) {
+        console.warn("DevTools detected - potentially insecure environment");
+        alert("Security warning: browser developer tools detected");
+    }
+    
+    // Add more environment checks
+    if (window.Firebug && window.Firebug.chrome && window.Firebug.chrome.isInitialized) {
+        console.warn("Firebug detected - potentially insecure environment");
+        alert("Security warning: debugging tools detected");
+    }
+    
+    // Certificate verification using fetch with strict validation
     fetch('/verify-cert', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -396,12 +393,14 @@ function verifyConnection(certFingerprint) {
     .then(response => response.json())
     .then(data => {
         if (!data.valid) {
-            console.error("Certificate validation failed");
+            console.error("Certificate validation failed - possible MITM attack");
+            alert("Security error: Certificate validation failed");
             window.location.href = '/login';
         }
     })
     .catch(error => {
         console.error("Certificate verification error:", error);
+        alert("Security warning: Unable to verify secure connection");
     });
     
     return true;
@@ -411,23 +410,62 @@ function verifyConnection(certFingerprint) {
  * Detect tampering with the page by browser extensions or other tools
  */
 function detectExtensionTampering(expectedScriptLength) {
-    // In development mode, we just log tampering instead of redirecting
-    // to avoid constant redirects
-    
     // Create an integrity object with checksums
     const integrityData = {
         originalLength: expectedScriptLength,
         cssRules: document.styleSheets[0]?.cssRules?.length || 0
     };
     
-    // Monitor for DOM changes
+    // Check for known extension patterns
+    function checkForExtensions() {
+        // Look for extension-specific DOM elements
+        const suspiciousElements = [
+            '__REACT_DEVTOOLS_GLOBAL_HOOK__',
+            '__REDUX_DEVTOOLS_EXTENSION__',
+            '__VUE_DEVTOOLS_GLOBAL_HOOK__',
+            '_GRAMMARLY_',
+            '_GRAMMARLY_EXTENSION'
+        ];
+        
+        for (const elem of suspiciousElements) {
+            if (window[elem]) {
+                console.warn(`Detected potential monitoring extension: ${elem}`);
+                reportTampering('extension_detected');
+                return true;
+            }
+        }
+        return false;
+    }
+    
+    // Monitor for DOM changes that could indicate tampering
     const observer = new MutationObserver(mutations => {
         for (const mutation of mutations) {
             if (mutation.type === 'childList' || 
                 (mutation.type === 'attributes' && 
-                 ['src', 'href', 'integrity'].includes(mutation.attributeName))) {
-                // Just log without redirecting in development
-                console.log("DOM change detected:", mutation.type);
+                 ['src', 'href', 'integrity', 'content', 'onclick', 'onload'].includes(mutation.attributeName))) {
+                
+                console.warn(`DOM tampering detected: ${mutation.type} on ${mutation.target.nodeName}`);
+                
+                // Check for malicious modifications (script or iframe insertions)
+                if (mutation.type === 'childList' && mutation.addedNodes.length) {
+                    for (const node of mutation.addedNodes) {
+                        if (node.nodeName === 'SCRIPT' || node.nodeName === 'IFRAME') {
+                            console.error(`Security risk: Dynamic ${node.nodeName} insertion detected`);
+                            reportTampering('script_injection');
+                            alert("Security warning: Browser extension tampering detected");
+                        }
+                    }
+                }
+                
+                // Check for attribute modifications on security-sensitive elements
+                if (mutation.type === 'attributes' && 
+                    (mutation.target.nodeName === 'SCRIPT' || 
+                     mutation.target.nodeName === 'LINK' || 
+                     mutation.target.nodeName === 'META')) {
+                    
+                    console.error(`Security risk: Modified ${mutation.target.nodeName} attributes`);
+                    reportTampering('attribute_tampering');
+                }
             }
         }
     });
@@ -436,7 +474,8 @@ function detectExtensionTampering(expectedScriptLength) {
         attributes: true, 
         childList: true, 
         subtree: true,
-        characterData: true
+        characterData: true,
+        attributeOldValue: true
     });
     
     // Check if main script content is modified
@@ -445,10 +484,20 @@ function detectExtensionTampering(expectedScriptLength) {
         if (script.src.includes('crypto-utils.js') && 
             script.textContent && 
             script.textContent.length !== integrityData.originalLength) {
-            console.log("Script modification detected");
+            console.error("Script modification detected - potential security compromise");
+            reportTampering('script_modification');
+            alert("Security warning: Critical script has been modified");
             return false;
         }
     }
+    
+    // Run initial extension check
+    if (checkForExtensions()) {
+        return false;
+    }
+    
+    // Schedule periodic checks for extensions
+    setInterval(checkForExtensions, 30000);
     
     return true;
 }
