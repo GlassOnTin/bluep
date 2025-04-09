@@ -782,7 +782,7 @@
                                 downloadFile(fileBlob, fileInfo.name);
                                 
                                 // Update icon to show completed
-                                const iconElement = document.getElementById(`file-icon-${fileId}`);
+                                const iconElement = document.getElementById(`file-icon-${msg.fileId}`);
                                 if (iconElement) {
                                     iconElement.innerHTML = '✅';
                                 }
