@@ -304,10 +304,10 @@ async function encryptText(text, key) {
         encryptedBuffer.set(iv, 0);
         encryptedBuffer.set(new Uint8Array(encryptedContent), iv.byteLength);
         
-        // Convert to base64 for transmission
-        const result = btoa(String.fromCharCode.apply(null, encryptedBuffer));
+        // Convert to base64 using a safe approach
+        const base64 = await arrayBufferToBase64(encryptedBuffer);
         console.log("Successfully encrypted text with AES-GCM");
-        return result;
+        return base64;
     } catch (e) {
         console.error("Encryption error:", e);
         throw new Error("Encryption failed: " + e.message);
@@ -326,34 +326,110 @@ async function decryptText(encryptedText, key) {
             throw new Error("Decryption key missing");
         }
         
-        // Convert from base64
-        const encryptedBuffer = Uint8Array.from(atob(encryptedText), c => c.charCodeAt(0));
+        // Input validation - check for empty or invalid input
+        if (!encryptedText) {
+            console.error("Empty encrypted text received");
+            throw new Error("Empty encrypted data");
+        }
         
-        // Extract IV and encrypted content
-        const iv = encryptedBuffer.slice(0, 12);
-        const encryptedContent = encryptedBuffer.slice(12);
+        if (typeof encryptedText !== 'string') {
+            console.error("Invalid encrypted text type - must be string");
+            throw new Error("Invalid encrypted data type");
+        }
         
-        const encoder = new TextEncoder();
+        // Allow for smaller text content, but ensure basic structure for base64
+        if (encryptedText.length < 10 || !/^[A-Za-z0-9+/=]+$/.test(encryptedText)) {
+            console.error("Invalid encrypted text format - not valid base64");
+            throw new Error("Invalid encrypted data format: not valid base64");
+        }
         
-        // Decrypt the data with the same authentication info used in encryption
-        const decryptedContent = await window.crypto.subtle.decrypt(
-            {
-                name: "AES-GCM",
-                iv: iv,
-                additionalData: encoder.encode("bluep_secure")
-            },
-            decryptionKey,
-            encryptedContent
-        );
-        
-        // Convert to text
-        const result = new TextDecoder().decode(decryptedContent);
-        console.log("Successfully decrypted text with AES-GCM");
-        return result;
+        try {
+            // Convert from base64
+            const encryptedBuffer = Uint8Array.from(atob(encryptedText), c => c.charCodeAt(0));
+            
+            // Validate buffer size - must be at least IV (12 bytes) + 1 byte of content
+            if (encryptedBuffer.length <= 12) {
+                console.error("Encrypted data too small - must contain IV and content");
+                throw new Error("The provided data is too small");
+            }
+            
+            // Extract IV and encrypted content
+            const iv = encryptedBuffer.slice(0, 12);
+            const encryptedContent = encryptedBuffer.slice(12);
+            
+            const encoder = new TextEncoder();
+            
+            // Decrypt the data with the same authentication info used in encryption
+            const decryptedContent = await window.crypto.subtle.decrypt(
+                {
+                    name: "AES-GCM",
+                    iv: iv,
+                    additionalData: encoder.encode("bluep_secure")
+                },
+                decryptionKey,
+                encryptedContent
+            );
+            
+            // Convert to text
+            const result = new TextDecoder().decode(decryptedContent);
+            console.log("Successfully decrypted text with AES-GCM");
+            return result;
+        } catch (e) {
+            // More specific error for better debugging
+            if (e.name === 'OperationError') {
+                console.error("Decryption operation failed:", e);
+                throw new Error("Decryption operation failed - possible corrupted data or wrong key");
+            }
+            throw e; // Re-throw for other errors
+        }
     } catch (e) {
         console.error("Decryption error:", e);
+        // Enhanced error handling for file transfers
+        const isFileRelated = e.message && (
+            e.message.includes("too small") || 
+            e.message.includes("corrupted") ||
+            e.message.includes("format")
+        );
+        
+        if (isFileRelated) {
+            console.warn("This appears to be a file transfer related error - may need to retry");
+        }
+        
         throw new Error("Decryption failed: " + e.message);
     }
+}
+
+/**
+ * Safely converts an ArrayBuffer to base64 string without stack overflow
+ * Uses different techniques based on the size of the buffer
+ */
+async function arrayBufferToBase64(buffer) {
+    // For small buffers, use the native approach which is faster
+    if (buffer.length < 10000) {
+        return btoa(String.fromCharCode.apply(null, new Uint8Array(buffer)));
+    }
+    
+    // For large buffers, use Blob + FileReader to avoid call stack limits
+    return new Promise((resolve, reject) => {
+        const blob = new Blob([buffer], {type: 'application/octet-stream'});
+        const reader = new FileReader();
+        
+        reader.onload = function() {
+            // FileReader.readAsDataURL returns a data URL with format:
+            // "data:application/octet-stream;base64,BASE64_DATA"
+            // We need to extract just the base64 part
+            const dataUrl = reader.result;
+            const base64 = dataUrl.split(',')[1];
+            resolve(base64);
+        };
+        
+        reader.onerror = function() {
+            reject(new Error("Failed to convert array buffer to base64"));
+        };
+        
+        // Read as data URL which gives us base64
+        reader.readAsDataURL(blob);
+    });
 }
 
 /**
@@ -408,19 +484,48 @@ function verifyConnection(certFingerprint) {
 
 /**
  * Detect tampering with the page by browser extensions or other tools
+ * This is a simplified implementation that focuses on specific security concerns
+ * and avoids false positives with normal UI updates
  */
+// Global flag to track whether MutationObserver is paused
+let mutationObserverPaused = false;
+
+// Function to temporarily pause MutationObserver for legitimate DOM updates
+window.pauseMutationObserver = function(duration = 500) {
+    mutationObserverPaused = true;
+    setTimeout(() => {
+        mutationObserverPaused = false;
+    }, duration);
+};
+
 function detectExtensionTampering(expectedScriptLength) {
+    // Set to false for development, true for production
+    const STRICT_TAMPERING_MODE = false;
+    
+    // Make sure we handle title changes properly
+    document.addEventListener('DOMContentLoaded', () => {
+        if (window.pauseMutationObserver) {
+            const origSetTitle = document.title;
+            Object.defineProperty(document, 'title', {
+                set: function(newTitle) {
+                    window.pauseMutationObserver(200);
+                    origSetTitle.call(this, newTitle);
+                    return newTitle;
+                }
+            });
+        }
+    });
+
     // Create an integrity object with checksums
     const integrityData = {
         originalLength: expectedScriptLength,
         cssRules: document.styleSheets[0]?.cssRules?.length || 0
     };
     
-    // Check for known extension patterns
+    // Check for known extension patterns that might tamper with security
     function checkForExtensions() {
         // Look for extension-specific DOM elements
         const suspiciousElements = [
-            '__REACT_DEVTOOLS_GLOBAL_HOOK__',
             '__REDUX_DEVTOOLS_EXTENSION__',
             '__VUE_DEVTOOLS_GLOBAL_HOOK__',
             '_GRAMMARLY_',
@@ -429,59 +534,110 @@ function detectExtensionTampering(expectedScriptLength) {
         
         for (const elem of suspiciousElements) {
             if (window[elem]) {
-                console.warn(`Detected potential monitoring extension: ${elem}`);
-                reportTampering('extension_detected');
-                return true;
+                if (STRICT_TAMPERING_MODE) {
+                    console.warn(`Detected potential monitoring extension: ${elem}`);
+                    reportTampering('extension_detected');
+                    return true;
+                } else {
+                    // In dev mode, just log it but don't report
+                    console.log(`Dev mode: Detected browser extension (${elem}), ignoring in development`);
+                }
             }
         }
         return false;
     }
     
-    // Monitor for DOM changes that could indicate tampering
-    const observer = new MutationObserver(mutations => {
+    // Instead of watching all DOM mutations, we'll focus on just a few key concerns:
+    // 1. New script tags
+    // 2. New iframe tags
+    // 3. Script tag attribute changes
+    
+    // Safe DOM elements we create ourselves
+    const safeIds = [
+        'file-list', 
+        'editor', 
+        'file-drop-area', 
+        'download-container', 
+        'download-link',
+        'progress-notification'
+    ];
+    
+    // Only observe <head> and <body> tags for script injections
+    // This avoids capturing unrelated DOM changes
+    
+    // Create a targeted observer just for <script> and <iframe> elements
+    const securityObserver = new MutationObserver(function(mutations) {
+        // Skip observation if paused or not in strict mode
+        if (mutationObserverPaused || !STRICT_TAMPERING_MODE) return;
+        
         for (const mutation of mutations) {
-            if (mutation.type === 'childList' || 
-                (mutation.type === 'attributes' && 
-                 ['src', 'href', 'integrity', 'content', 'onclick', 'onload'].includes(mutation.attributeName))) {
+            // Skip if the target is a TITLE element
+            if (mutation.target && (mutation.target.nodeName === 'TITLE' || mutation.target.tagName === 'TITLE')) continue;
+            
+            // Only interested in childList changes (element addition)
+            if (mutation.type !== 'childList' || !mutation.addedNodes.length) continue;
+            
+            // Check each added node
+            for (const node of mutation.addedNodes) {
+                // Only interested in elements
+                if (node.nodeType !== Node.ELEMENT_NODE) continue;
                 
-                console.warn(`DOM tampering detected: ${mutation.type} on ${mutation.target.nodeName}`);
+                // Explicitly skip any TITLE changes to avoid false positives
+                if (node.nodeName === 'TITLE' || node.tagName === 'TITLE' || 
+                    (mutation.target && (mutation.target.nodeName === 'TITLE' || mutation.target.tagName === 'TITLE'))) continue;
                 
-                // Check for malicious modifications (script or iframe insertions)
-                if (mutation.type === 'childList' && mutation.addedNodes.length) {
-                    for (const node of mutation.addedNodes) {
-                        if (node.nodeName === 'SCRIPT' || node.nodeName === 'IFRAME') {
-                            console.error(`Security risk: Dynamic ${node.nodeName} insertion detected`);
-                            reportTampering('script_injection');
-                            alert("Security warning: Browser extension tampering detected");
-                        }
-                    }
-                }
+                // Skip our own known safe elements
+                if (node.id && safeIds.includes(node.id)) continue;
                 
-                // Check for attribute modifications on security-sensitive elements
-                if (mutation.type === 'attributes' && 
-                    (mutation.target.nodeName === 'SCRIPT' || 
-                     mutation.target.nodeName === 'LINK' || 
-                     mutation.target.nodeName === 'META')) {
-                    
-                    console.error(`Security risk: Modified ${mutation.target.nodeName} attributes`);
-                    reportTampering('attribute_tampering');
+                // Check for suspicious elements
+                if (node.nodeName === 'SCRIPT' || node.nodeName === 'IFRAME') {
+                    console.error(`Security risk: Dynamic ${node.nodeName} insertion detected`);
+                    reportTampering('script_injection');
+                    alert("Security warning: Browser extension tampering detected");
                 }
             }
         }
     });
     
-    observer.observe(document, { 
-        attributes: true, 
-        childList: true, 
-        subtree: true,
-        characterData: true,
-        attributeOldValue: true
+    // Only observe <head> and <body> for script insertion
+    // This drastically reduces false positives from UI changes
+    if (document.head) {
+        securityObserver.observe(document.head, { 
+            childList: true 
+        });
+    }
+    
+    if (document.body) {
+        securityObserver.observe(document.body, { 
+            childList: true 
+        });
+    }
+    
+    // For script attribute changes, we'll use another targeted observer
+    const scriptObserver = new MutationObserver(function(mutations) {
+        // Skip observation if paused or not in strict mode
+        if (mutationObserverPaused || !STRICT_TAMPERING_MODE) return;
+        
+        for (const mutation of mutations) {
+            if (mutation.type !== 'attributes') continue;
+            
+            const sensitiveAttributes = ['src', 'href', 'integrity', 'content', 'onclick', 'onload'];
+            if (!sensitiveAttributes.includes(mutation.attributeName)) continue;
+            
+            console.error(`Security risk: Modified ${mutation.target.nodeName} ${mutation.attributeName} attribute`);
+            reportTampering('attribute_tampering');
+        }
     });
     
+    // Find all script tags and observe them
+    const allScripts = document.getElementsByTagName('script');
+    for (const script of allScripts) {
+        scriptObserver.observe(script, { attributes: true });
+    }
+    
     // Check if main script content is modified
-    const scripts = document.getElementsByTagName('script');
-    for (const script of scripts) {
-        if (script.src.includes('crypto-utils.js') && 
+    for (const script of allScripts) {
+        if (script.src && script.src.includes('crypto-utils.js') && 
             script.textContent && 
             script.textContent.length !== integrityData.originalLength) {
             console.error("Script modification detected - potential security compromise");
@@ -491,32 +647,32 @@ function detectExtensionTampering(expectedScriptLength) {
         }
     }
     
-    // Run initial extension check
-    if (checkForExtensions()) {
-        return false;
-    }
-    
     // Schedule periodic checks for extensions
     setInterval(checkForExtensions, 30000);
     
-    return true;
+    // Initial run of extension check
+    return checkForExtensions();
 }
 
 /**
  * Report tampering to the server
  */
 function reportTampering(type) {
-    // In development mode, we just log tampering instead of redirecting
+    // Log the tampering event
     console.log("Tampering detected:", type);
     
-    // Just report to server but don't redirect
+    // Always report to server for monitoring
     fetch('/tampering-report', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ 
             type: type,
-            timestamp: Date.now()
+            timestamp: Date.now(),
+            devMode: !STRICT_TAMPERING_MODE
         }),
         keepalive: true
     }).catch(err => console.error("Failed to report tampering:", err));
+    
+    // In strict mode (production), we could take more restrictive actions
+    // like redirecting the user or showing stronger warnings
 }

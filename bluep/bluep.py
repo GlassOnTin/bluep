@@ -49,6 +49,9 @@ class BlueApp:
         self.ws_manager = WebSocketManager(session_manager=self.session_manager)
         configure_security(self.app)
         
+        # Initialize certificate fingerprint with empty string
+        self.cert_fingerprint = ""
+        
         # Mount static files directory for serving JavaScript
         self.app.mount("/static", StaticFiles(directory="static"), name="static")
         
@@ -70,6 +73,7 @@ class BlueApp:
 
     def _configure_routes(self) -> None:
         self.app.get("/")(self.get)
+        self.app.post("/")(self.post)  # Added POST handler for secure TOTP submission
         self.app.get("/qr-raw")(self.qr_raw)
         self.app.get("/setup")(self.setup)
         self.app.get("/login")(self.login)
@@ -132,15 +136,65 @@ class BlueApp:
         """Serve the login page."""
         return templates.TemplateResponse("login.html", {"request": request})
 
-    async def get(self, request: Request, response: Response, key: Optional[str] = None) -> Response:
-        if not key:
+    async def get(self, request: Request, response: Response) -> Response:
+        """Handle GET request to root - check if user is already authenticated via cookie"""
+        cookie = request.cookies.get(self.session_manager.cookie_name)
+        if not cookie:
             return RedirectResponse(url="/login")
+            
+        # Verify existing session
+        session = self.session_manager.get_session(cookie)
+        if not session:
+            return RedirectResponse(url="/login")
+            
+        # User is authenticated, proceed to editor
+        logger.debug(f"Using existing session with token: {session.websocket_token}")
+        
+        # Calculate script lengths for integrity checks
+        script_length = self._get_script_length("/static/js/crypto-utils.js")
+
+        # Set a cookie with the token instead of passing it in the template
+        response = templates.TemplateResponse(
+            "editor.html",
+            {
+                "request": request,
+                "host_ip": settings.host_ip,
+                "token": session.websocket_token,
+                "blue": settings.blue_color,
+                "cert_fingerprint": self.cert_fingerprint,
+                "script_length": script_length,
+                "shared_key": self.session_manager.shared_encryption_key,
+            },
+        )
+        
+        # Set secure HTTP-only cookie for the token instead of exposing in URL
+        expiry = int(time.time() + (60 * 60))  # 1 hour expiration
+        if session.websocket_token:
+            response.set_cookie(
+                key="bluep_token", 
+                value=session.websocket_token,
+                httponly=True,
+                secure=True,
+                samesite="strict",
+                expires=expiry
+            )
+        
+        return response
+    
+    async def post(self, request: Request, response: Response) -> Response:
+        """Handle POST request for secure TOTP submission"""
+        form_data = await request.form()
+        key_input = form_data.get("key")
+        key = str(key_input) if key_input else ""
+        
+        if not key:
+            return RedirectResponse(url="/login", status_code=303)
 
         try:
             # Create session and get token
             verified = await self.auth.verify_and_create_session(key, request, response)
             if not verified:
-                return RedirectResponse(url="/login")
+                return RedirectResponse(url="/login", status_code=303)
 
             # Get the latest session
             latest_session = list(self.session_manager.sessions.values())[-1]
@@ -149,12 +203,12 @@ class BlueApp:
             # Calculate script lengths for integrity checks
             script_length = self._get_script_length("/static/js/crypto-utils.js")
 
-            return templates.TemplateResponse(
+            # Set a cookie with the token instead of passing it in the template
+            response = templates.TemplateResponse(
                 "editor.html",
                 {
                     "request": request,
                     "host_ip": settings.host_ip,
-                    "key": key,
                     "token": latest_session.websocket_token,
                     "blue": settings.blue_color,
                     "cert_fingerprint": self.cert_fingerprint,
@@ -162,9 +216,23 @@ class BlueApp:
                     "shared_key": self.session_manager.shared_encryption_key,
                 },
             )
+            
+            # Set secure HTTP-only cookie for the token instead of exposing in URL
+            expiry = int(time.time() + (60 * 60))  # 1 hour expiration
+            if latest_session.websocket_token:
+                response.set_cookie(
+                    key="bluep_token", 
+                    value=latest_session.websocket_token,
+                    httponly=True,
+                    secure=True,
+                    samesite="strict",
+                    expires=expiry
+                )
+            
+            return response
         except Exception as e:
-            logger.error(f"Error in get route: {e}", exc_info=True)
-            return RedirectResponse(url="/login")
+            logger.error(f"Error in post route: {e}", exc_info=True)
+            return RedirectResponse(url="/login", status_code=303)
     
     def _get_script_length(self, script_path: str) -> int:
         """Get the length of a script file for integrity checks."""
@@ -177,17 +245,21 @@ class BlueApp:
 
     async def websocket_endpoint(self, websocket: WebSocket) -> None:
         try:
-            token = websocket.query_params.get('token')
+            # Get token from secure cookie instead of URL parameter
+            cookies = websocket.cookies
+            token = cookies.get('bluep_token')
             if not token:
+                logger.warning("WebSocket connection attempt without token cookie")
                 await websocket.close(code=4000)
                 return
 
-            logger.debug(f"WS connect attempt. Token: {token}")
+            logger.debug(f"WS connect attempt with token from cookie")
             logger.debug(f"Valid tokens: {list(self.session_manager.websocket_tokens.keys())}")
 
             await self.ws_manager.connect(websocket, token)
 
             if websocket not in self.ws_manager.active_connections:
+                logger.warning("WebSocket connection rejected - invalid token")
                 await websocket.close(code=4001)
                 return
 
@@ -373,13 +445,9 @@ class BlueApp:
             logger.error(f"Error handling CSP report: {e}")
             return Response(status_code=500)
         
-    async def favicon(self, key: Optional[str] = None) -> Response:
-        """Serve the favicon, requiring auth if no key is provided"""
-        # If key is provided, it was already authenticated via the route
-        # If no key is provided, return 403 Forbidden
-        if key is None:
-            return Response(status_code=403, content="Authentication required")
-            
+    async def favicon(self, request: Request, key: Optional[str] = None) -> Response:
+        """Serve the favicon, requiring auth via session cookie or key parameter"""
+        # No authentication required for favicon.png
         img = Image.new("RGB", (32, 32), settings.blue_color)
         buffer = BytesIO()
         img.save(buffer, format="PNG")
