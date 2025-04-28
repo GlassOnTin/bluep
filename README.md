@@ -81,6 +81,8 @@ https://<your-local-ip>:8500
 
 ## Running as a System Service
 
+### Standard Linux Installation
+
 On Linux systems with systemd, you can install bluep as a system service:
 
 ```bash
@@ -112,6 +114,32 @@ You can customize the user the service runs as:
 ```bash
 sudo python install_service.py --user your_username
 ```
+
+### Windows Installation
+
+Bluep now supports running natively on Windows 11 without requiring WSL. Use the included PowerShell setup script to configure your Windows environment:
+
+```powershell
+# Run as Administrator
+# Right-click on windows_setup.ps1 and select "Run with PowerShell as Administrator"
+# Or from an elevated PowerShell prompt:
+PowerShell.exe -ExecutionPolicy Bypass -File windows_setup.ps1
+```
+
+This script will:
+1. Configure the Windows Firewall to allow traffic on port 8500
+2. Check for and install OpenSSL if needed
+3. Set up the Python virtual environment and install dependencies
+4. Generate SSL certificates if they don't exist
+5. Create a Windows scheduled task to run Bluep as a service
+
+Alternatively, you can run Bluep manually using the batch script:
+
+```cmd
+run_bluep_windows.bat
+```
+
+You can access Bluep in your browser at `https://localhost:8500` or `https://<your-ip-address>:8500` from other devices on your network.
 
 ## License
 MIT License
