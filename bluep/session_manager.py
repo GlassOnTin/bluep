@@ -13,12 +13,13 @@ from .models import SessionData, ConnectionState
 
 logger = logging.getLogger(__name__)
 
+
 class SessionManager:
     def __init__(
         self,
         cookie_name: str = "bluep_session",
         cookie_max_age: int = 86400,
-        refresh_threshold: int = 3600
+        refresh_threshold: int = 3600,
     ):
         self.sessions: Dict[str, SessionData] = {}
         self.websocket_tokens: Dict[str, str] = {}  # token -> session_id
@@ -46,7 +47,7 @@ class SessionManager:
             expiry=datetime.now() + timedelta(seconds=self.cookie_max_age),
             last_totp_use="",
             websocket_token=websocket_token,
-            connection_state=ConnectionState.INITIALIZING
+            connection_state=ConnectionState.INITIALIZING,
         )
 
         self._set_cookie(response, session_id)
@@ -74,10 +75,12 @@ class SessionManager:
             max_age=self.cookie_max_age,
             httponly=True,
             secure=True,
-            samesite="strict"
+            samesite="strict",
         )
 
-    def get_session(self, session_id: str, response: Optional[Response] = None) -> Optional[SessionData]:
+    def get_session(
+        self, session_id: str, response: Optional[Response] = None
+    ) -> Optional[SessionData]:
         session = self.sessions.get(session_id)
         if not session:
             return None
@@ -97,7 +100,8 @@ class SessionManager:
         """Remove expired sessions and their associated tokens"""
         current_time = datetime.now()
         expired = [
-            sid for sid, session in self.sessions.items()
+            sid
+            for sid, session in self.sessions.items()
             if current_time > session.expiry
         ]
 
@@ -115,7 +119,11 @@ class SessionManager:
             return False
 
         # Check connection state
-        if session.connection_state not in [None, ConnectionState.CLOSED, ConnectionState.INITIALIZING]:
+        if session.connection_state not in [
+            None,
+            ConnectionState.CLOSED,
+            ConnectionState.INITIALIZING,
+        ]:
             return False
 
         session.last_totp_use = totp_code

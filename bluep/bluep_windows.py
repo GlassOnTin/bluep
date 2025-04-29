@@ -28,12 +28,12 @@ from cryptography.hazmat.primitives import serialization
 from .auth import TOTPAuth
 from .config import Settings
 from .models import (
-    WebSocketMessage, 
-    CertificateVerification, 
+    WebSocketMessage,
+    CertificateVerification,
     TamperingReport,
     KeyExchangeRequest,
     KeyExchangeResponse,
-    KeyExchangeData
+    KeyExchangeData,
 )
 from .middleware import configure_security
 from .websocket_manager import WebSocketManager
@@ -44,6 +44,7 @@ logger = logging.getLogger(__name__)
 templates = Jinja2Templates(directory="templates")
 settings = Settings()
 
+
 class BlueApp:
     def __init__(self) -> None:
         self.app = FastAPI()
@@ -51,18 +52,18 @@ class BlueApp:
         self.session_manager = self.auth.session_manager
         self.ws_manager = WebSocketManager(session_manager=self.session_manager)
         configure_security(self.app)
-        
+
         # Initialize certificate fingerprint with empty string
         self.cert_fingerprint = ""
-        
+
         # Mount static files directory for serving JavaScript
         self.app.mount("/static", StaticFiles(directory="static"), name="static")
-        
+
         # Calculate and store certificate fingerprint
         self._calculate_cert_fingerprint()
-        
+
         self._configure_routes()
-        
+
     def _calculate_cert_fingerprint(self) -> None:
         """Calculate SHA-256 fingerprint of the SSL certificate."""
         try:
@@ -106,7 +107,9 @@ class BlueApp:
         """Generate and serve the TOTP QR code."""
         try:
             qr = qrcode.QRCode(version=1, box_size=10, border=5)
-            provisioning_uri = self.auth.totp.provisioning_uri("Bluep Room", issuer_name="Bluep")
+            provisioning_uri = self.auth.totp.provisioning_uri(
+                "Bluep Room", issuer_name="Bluep"
+            )
             qr.add_data(provisioning_uri)
             qr.make(fit=True)
 
@@ -136,16 +139,16 @@ class BlueApp:
             if session_cookie and self.session_manager.validate_session(session_cookie):
                 # User is authenticated, serve the editor
                 return templates.TemplateResponse(
-                    "editor.html", 
+                    "editor.html",
                     {
                         "request": request,
                         "cert_fingerprint": self.cert_fingerprint,
-                    }
+                    },
                 )
             else:
                 # No valid session, redirect to login
                 return RedirectResponse(url="/login")
-                
+
         except Exception as e:
             logger.error(f"Error in GET handler: {e}")
             return Response(
@@ -159,30 +162,32 @@ class BlueApp:
         try:
             form_data = await request.form()
             totp_token = form_data.get("totp")
-            
+
             if not totp_token:
                 logger.warning("TOTP token missing from submission")
                 return templates.TemplateResponse(
-                    "login.html", 
+                    "login.html",
                     {"request": request, "error": "TOTP token required"},
-                    status_code=400
+                    status_code=400,
                 )
-            
+
             # Verify TOTP token
             if self.auth.verify_totp(totp_token):
                 # Create new session
                 session_id = self.session_manager.create_session()
-                session_cookie = self.session_manager.generate_session_cookie(session_id)
-                
+                session_cookie = self.session_manager.generate_session_cookie(
+                    session_id
+                )
+
                 # Create response with session cookie
                 editor_response = templates.TemplateResponse(
-                    "editor.html", 
+                    "editor.html",
                     {
                         "request": request,
                         "cert_fingerprint": self.cert_fingerprint,
-                    }
+                    },
                 )
-                
+
                 # Set secure, httpOnly cookie with 3-hour expiry
                 editor_response.set_cookie(
                     key="session",
@@ -192,22 +197,22 @@ class BlueApp:
                     samesite="strict",
                     max_age=10800,  # 3 hours
                 )
-                
+
                 return editor_response
             else:
                 logger.warning("Invalid TOTP token submitted")
                 return templates.TemplateResponse(
-                    "login.html", 
+                    "login.html",
                     {"request": request, "error": "Invalid TOTP token"},
-                    status_code=401
+                    status_code=401,
                 )
-                
+
         except Exception as e:
             logger.error(f"Error in POST handler: {e}")
             return templates.TemplateResponse(
-                "login.html", 
+                "login.html",
                 {"request": request, "error": "An unexpected error occurred"},
-                status_code=500
+                status_code=500,
             )
 
     def _get_script_length(self, script_path: str) -> Optional[int]:
@@ -222,60 +227,59 @@ class BlueApp:
     async def websocket_endpoint(self, websocket: WebSocket) -> None:
         try:
             await websocket.accept()
-            
+
             # Expect initial authentication message
             auth_message = await websocket.receive_json()
-            
+
             # Validate token
             token = auth_message.get("token")
             if not token:
                 logger.warning("No token provided in WebSocket connection")
                 await websocket.close(code=1008)  # Policy violation
                 return
-                
+
             session_id = self.session_manager.validate_websocket_token(token)
-            
+
             if not session_id:
                 logger.warning(f"Invalid token provided: {token[:10]}...")
                 await websocket.close(code=1008)  # Policy violation
                 return
-                
+
             # Mark token as used - single use only
             self.session_manager.websocket_tokens.pop(token, None)
-            
+
             # Register connection with WebSocket manager
             await self.ws_manager.connect(websocket, session_id)
-            
+
             logger.info(f"WebSocket connection established for session {session_id}")
-            
+
             # Generate and send a fresh WebSocket token for reconnection
             new_token = self.session_manager.create_websocket_token(session_id)
-            await websocket.send_json({
-                "type": "refresh_token",
-                "token": new_token
-            })
-            
+            await websocket.send_json({"type": "refresh_token", "token": new_token})
+
             try:
                 # Process messages
                 async for data in websocket.iter_json():
                     try:
                         message = WebSocketMessage(**data)
-                        
+
                         # Process based on message type
                         if message.type == "content_update":
-                            await self.ws_manager.broadcast(message, websocket, session_id)
+                            await self.ws_manager.broadcast(
+                                message, websocket, session_id
+                            )
                         else:
                             logger.warning(f"Unknown message type: {message.type}")
-                            
+
                     except Exception as e:
                         logger.error(f"Error processing message: {e}")
                         continue
-                        
+
             except WebSocketDisconnect:
                 logger.info(f"WebSocket disconnected for session {session_id}")
             finally:
                 await self.ws_manager.disconnect(websocket)
-                
+
         except Exception as e:
             logger.error(f"Error in WebSocket connection: {e}")
             await websocket.close(code=1011)  # Internal error
@@ -285,39 +289,49 @@ class BlueApp:
         try:
             data = await request.json()
             cert_verification = CertificateVerification(**data)
-            
+
             client_fingerprint = cert_verification.fingerprint
-            
+
             # Skip verification if we couldn't calculate our fingerprint
             if not self.cert_fingerprint:
-                logger.warning("Server couldn't calculate certificate fingerprint, skipping verification")
-                return Response(
-                    content=json.dumps({"verified": True, "reason": "server_no_fingerprint"}),
-                    media_type="application/json"
+                logger.warning(
+                    "Server couldn't calculate certificate fingerprint, skipping verification"
                 )
-            
+                return Response(
+                    content=json.dumps(
+                        {"verified": True, "reason": "server_no_fingerprint"}
+                    ),
+                    media_type="application/json",
+                )
+
             # Compare fingerprints
             if client_fingerprint == self.cert_fingerprint:
                 return Response(
                     content=json.dumps({"verified": True}),
-                    media_type="application/json"
+                    media_type="application/json",
                 )
             else:
-                logger.warning(f"Certificate fingerprint mismatch: client={client_fingerprint}, server={self.cert_fingerprint}")
+                logger.warning(
+                    f"Certificate fingerprint mismatch: client={client_fingerprint}, server={self.cert_fingerprint}"
+                )
                 return Response(
-                    content=json.dumps({
-                        "verified": False,
-                        "server_fingerprint": self.cert_fingerprint, 
-                        "client_fingerprint": client_fingerprint
-                    }),
-                    media_type="application/json"
+                    content=json.dumps(
+                        {
+                            "verified": False,
+                            "server_fingerprint": self.cert_fingerprint,
+                            "client_fingerprint": client_fingerprint,
+                        }
+                    ),
+                    media_type="application/json",
                 )
         except Exception as e:
             logger.error(f"Error in certificate verification: {e}")
             return Response(
                 status_code=500,
-                content=json.dumps({"error": "Internal server error during certificate verification"}),
-                media_type="application/json"
+                content=json.dumps(
+                    {"error": "Internal server error during certificate verification"}
+                ),
+                media_type="application/json",
             )
 
     async def key_exchange(self, request: Request) -> Response:
@@ -325,53 +339,52 @@ class BlueApp:
         try:
             data = await request.json()
             key_request = KeyExchangeRequest(**data)
-            
+
             # Validate session token
-            session_id = self.session_manager.validate_session(key_request.session_token)
+            session_id = self.session_manager.validate_session(
+                key_request.session_token
+            )
             if not session_id:
                 logger.warning(f"Invalid session token in key exchange")
                 raise HTTPException(status_code=401, detail="Invalid session token")
-            
+
             # Generate a single-use WebSocket authentication token
             ws_token = self.session_manager.create_websocket_token(session_id)
-            
+
             # For now, we don't actually need to derive a shared key
             # because the client will derive its key from the token
             exchange_data = KeyExchangeData(
-                websocket_token=ws_token,
-                server_key=None  # No server key needed
+                websocket_token=ws_token, server_key=None  # No server key needed
             )
-            
-            response = KeyExchangeResponse(
-                success=True,
-                data=exchange_data
-            )
-            
+
+            response = KeyExchangeResponse(success=True, data=exchange_data)
+
             logger.debug(f"Key exchange completed for session {session_id}")
-            
+
             return Response(
-                content=response.model_dump_json(),
-                media_type="application/json"
+                content=response.model_dump_json(), media_type="application/json"
             )
-            
+
         except HTTPException as e:
             raise e
         except Exception as e:
             logger.error(f"Error in key exchange: {e}")
             return Response(
                 status_code=500,
-                content=json.dumps({"error": "Internal server error during key exchange"}),
-                media_type="application/json"
+                content=json.dumps(
+                    {"error": "Internal server error during key exchange"}
+                ),
+                media_type="application/json",
             )
-    
+
     async def tampering_report(self, request: Request) -> Response:
         """Handle tampering reports from clients"""
         try:
             report_data = await request.json()
             report = TamperingReport(**report_data)
-            
+
             logger.warning(f"Tampering detected: {report.model_dump()}")
-            
+
             # Invalidate the session if there's a token
             token = report.token
             if token:
@@ -379,22 +392,25 @@ class BlueApp:
                 if session_id:
                     # Remove all tokens associated with this session
                     tokens_to_remove = []
-                    for session_token, sess_id in self.session_manager.websocket_tokens.items():
+                    for (
+                        session_token,
+                        sess_id,
+                    ) in self.session_manager.websocket_tokens.items():
                         if sess_id == session_id:
                             tokens_to_remove.append(session_token)
-                    
+
                     for token in tokens_to_remove:
                         self.session_manager.websocket_tokens.pop(token, None)
-                    
+
                     # Remove the session
                     if session_id in self.session_manager.sessions:
                         self.session_manager.sessions.pop(session_id)
-            
+
             return Response(status_code=204)
         except Exception as e:
             logger.error(f"Error handling tampering report: {e}")
             return Response(status_code=500)
-    
+
     async def csp_report(self, request: Request) -> Response:
         """Handle CSP violation reports"""
         try:
@@ -404,7 +420,7 @@ class BlueApp:
         except Exception as e:
             logger.error(f"Error handling CSP report: {e}")
             return Response(status_code=500)
-        
+
     async def favicon(self, request: Request, key: Optional[str] = None) -> Response:
         """Serve the favicon, requiring auth via session cookie or key parameter"""
         # No authentication required for favicon.png
@@ -436,7 +452,9 @@ class BlueApp:
             def signal_handler_thread():
                 try:
                     # This will block until Ctrl+C is pressed
-                    signal.signal(signal.SIGINT, lambda sig, frame: self.windows_signal_handler())
+                    signal.signal(
+                        signal.SIGINT, lambda sig, frame: self.windows_signal_handler()
+                    )
                     while True:
                         time.sleep(1)
                 except (KeyboardInterrupt, SystemExit):
@@ -447,7 +465,9 @@ class BlueApp:
         else:
             # Unix-style signal handling
             for sig in (signal.SIGTERM, signal.SIGINT):
-                loop.add_signal_handler(sig, lambda s=sig: asyncio.create_task(self.shutdown()))
+                loop.add_signal_handler(
+                    sig, lambda s=sig: asyncio.create_task(self.shutdown())
+                )
 
         print(f"\nSetup page: https://{settings.host_ip}:{settings.port}/setup\n")
         print(f"Server running at https://{settings.host_ip}:{settings.port}\n")
@@ -463,9 +483,11 @@ class BlueApp:
         server = uvicorn.Server(config=config)
         server.run()
 
+
 def main() -> None:
     blue_app = BlueApp()
     blue_app.main()
+
 
 if __name__ == "__main__":
     main()

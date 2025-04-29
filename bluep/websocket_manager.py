@@ -13,13 +13,16 @@ from .session_manager import SessionManager
 
 logger = logging.getLogger(__name__)
 
+
 @dataclass
 class ConnectionInfo:
     """Information about an active WebSocket connection."""
+
     session_id: str
     state: ConnectionState
     last_active: float
     pending_pings: int = 0
+
 
 class WebSocketManager:
     def __init__(self, session_manager: SessionManager, timeout: int = 3600):
@@ -36,10 +39,13 @@ class WebSocketManager:
         self,
         websocket: WebSocket,
         new_state: ConnectionState,
-        session_id: Optional[str] = None
+        session_id: Optional[str] = None,
     ) -> bool:
         async with self._lock:
-            if websocket not in self.active_connections and new_state != ConnectionState.INITIALIZING:
+            if (
+                websocket not in self.active_connections
+                and new_state != ConnectionState.INITIALIZING
+            ):
                 return False
 
             if websocket in self.active_connections:
@@ -56,9 +62,7 @@ class WebSocketManager:
 
             if new_state == ConnectionState.INITIALIZING:
                 self.active_connections[websocket] = ConnectionInfo(
-                    session_id=session_id,
-                    state=new_state,
-                    last_active=time.time()
+                    session_id=session_id, state=new_state, last_active=time.time()
                 )
             else:
                 self.active_connections[websocket].state = new_state
@@ -99,7 +103,7 @@ class WebSocketManager:
             self.active_connections[websocket] = ConnectionInfo(
                 session_id=session_id,
                 state=ConnectionState.CONNECTED,
-                last_active=time.time()
+                last_active=time.time(),
             )
 
             await self.broadcast_client_count()
@@ -115,8 +119,11 @@ class WebSocketManager:
                     info = self.active_connections.pop(websocket)
                     if info.session_id:
                         # Clean up token
-                        tokens_to_remove = [k for k,v in self.session_manager.websocket_tokens.items()
-                                        if v == info.session_id]
+                        tokens_to_remove = [
+                            k
+                            for k, v in self.session_manager.websocket_tokens.items()
+                            if v == info.session_id
+                        ]
                         for token in tokens_to_remove:
                             self.session_manager.websocket_tokens.pop(token)
                     await websocket.close()
@@ -132,7 +139,9 @@ class WebSocketManager:
         except Exception as e:
             logger.error(f"Error in disconnect cleanup: {e}")
 
-    async def broadcast(self, message: Dict[str, Any], exclude: Optional[WebSocket] = None) -> None:
+    async def broadcast(
+        self, message: Dict[str, Any], exclude: Optional[WebSocket] = None
+    ) -> None:
         disconnected = []
         connections_to_broadcast = []
 
@@ -156,9 +165,15 @@ class WebSocketManager:
         # Finally handle disconnections
         for connection in disconnected:
             await self.disconnect(connection, reason="broadcast_error")
-            
-    async def announce_file(self, file_id: str, file_name: str, file_size: int, 
-                         file_type: str, source_websocket: WebSocket) -> None:
+
+    async def announce_file(
+        self,
+        file_id: str,
+        file_name: str,
+        file_size: int,
+        file_type: str,
+        source_websocket: WebSocket,
+    ) -> None:
         """Announce a new file available for download to all clients"""
         # Store file metadata
         async with self._lock:
@@ -170,74 +185,72 @@ class WebSocketManager:
             else:
                 logger.error("Source connection not found")
                 return
-                
+
             # Store file metadata
             self.available_files[file_id] = {
                 "fileName": file_name,
                 "fileSize": file_size,
                 "fileType": file_type,
                 "sourceId": source_id,
-                "timestamp": time.time()
+                "timestamp": time.time(),
             }
-        
+
         # Broadcast file announcement to all clients
-        await self.broadcast({
-            "type": "file-announce",
-            "fileId": file_id,
-            "fileName": file_name,
-            "fileSize": file_size,
-            "fileType": file_type
-        }, exclude=source_websocket)
-        
+        await self.broadcast(
+            {
+                "type": "file-announce",
+                "fileId": file_id,
+                "fileName": file_name,
+                "fileSize": file_size,
+                "fileType": file_type,
+            },
+            exclude=source_websocket,
+        )
+
     async def handle_file_request(self, file_id: str, requester: WebSocket) -> None:
         """Handle a client requesting a file download"""
         # Check if the file exists
         if file_id not in self.available_files:
-            await requester.send_json({
-                "type": "error",
-                "error": "File not found"
-            })
+            await requester.send_json({"type": "error", "error": "File not found"})
             return
-            
+
         # Find the source connection
         source_websocket = None
         source_id = self.available_files[file_id]["sourceId"]
-        
+
         async with self._lock:
             for conn, info in self.active_connections.items():
                 if info.session_id == source_id:
                     source_websocket = conn
                     break
-        
+
         if not source_websocket:
             # Source client disconnected
-            await requester.send_json({
-                "type": "error",
-                "error": "File source disconnected"
-            })
+            await requester.send_json(
+                {"type": "error", "error": "File source disconnected"}
+            )
             # Clean up this file
             self.available_files.pop(file_id, None)
             return
-            
+
         # Forward the request to the source
         try:
-            await source_websocket.send_json({
-                "type": "file-request",
-                "fileId": file_id
-            })
+            await source_websocket.send_json(
+                {"type": "file-request", "fileId": file_id}
+            )
         except Exception as e:
             logger.error(f"Error requesting file from source: {e}")
-            await requester.send_json({
-                "type": "error",
-                "error": "Failed to request file from source"
-            })
+            await requester.send_json(
+                {"type": "error", "error": "Failed to request file from source"}
+            )
 
     async def broadcast_client_count(self) -> None:
         try:
             # Get count while holding lock
             async with self._lock:
                 connected_count = sum(
-                    1 for info in self.active_connections.values()
+                    1
+                    for info in self.active_connections.values()
                     if info.state == ConnectionState.CONNECTED
                 )
             # Broadcast without holding lock to prevent deadlocks
@@ -251,14 +264,16 @@ class WebSocketManager:
                 # Get current text while holding the lock
                 async with self._lock:
                     current_text = self.shared_text
-                    
+
                 # Send without holding the lock to prevent deadlocks
                 # Enable encryption for content messages
-                await websocket.send_json({
-                    "type": "content",
-                    "data": current_text,
-                    "encrypted": True  # Mark as encrypted so clients will decrypt
-                })
+                await websocket.send_json(
+                    {
+                        "type": "content",
+                        "data": current_text,
+                        "encrypted": True,  # Mark as encrypted so clients will decrypt
+                    }
+                )
         except Exception as e:
             logger.error(f"Error sending current text: {e}")
             await self.disconnect(websocket, reason="send_error")
@@ -274,32 +289,28 @@ class WebSocketManager:
                 self.active_connections[websocket].last_active = time.time()
 
     def _is_valid_transition(
-        self,
-        current: Optional[ConnectionState],
-        new: ConnectionState
+        self, current: Optional[ConnectionState], new: ConnectionState
     ) -> bool:
         if current is None:
             return new == ConnectionState.INITIALIZING
 
         valid_transitions = {
             ConnectionState.INITIALIZING: {ConnectionState.AUTHENTICATING},
-            ConnectionState.AUTHENTICATING: {ConnectionState.CONNECTED, ConnectionState.DISCONNECTING},
+            ConnectionState.AUTHENTICATING: {
+                ConnectionState.CONNECTED,
+                ConnectionState.DISCONNECTING,
+            },
             ConnectionState.CONNECTED: {ConnectionState.DISCONNECTING},
             ConnectionState.DISCONNECTING: {ConnectionState.CLOSED},
-            ConnectionState.CLOSED: {ConnectionState.INITIALIZING}
+            ConnectionState.CLOSED: {ConnectionState.INITIALIZING},
         }
 
         return new in valid_transitions.get(current, set())
 
     async def _broadcast_state_change(
-        self,
-        websocket: WebSocket,
-        state: ConnectionState
+        self, websocket: WebSocket, state: ConnectionState
     ) -> None:
-        msg = WebSocketMessage(
-            type="state",
-            state=state.value
-        )
+        msg = WebSocketMessage(type="state", state=state.value)
         await self.broadcast(msg.model_dump(exclude_none=True))
 
     async def _keep_alive(self, websocket: WebSocket) -> None:

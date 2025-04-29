@@ -25,12 +25,12 @@ from cryptography.hazmat.primitives import serialization
 from .auth import TOTPAuth
 from .config import Settings
 from .models import (
-    WebSocketMessage, 
-    CertificateVerification, 
+    WebSocketMessage,
+    CertificateVerification,
     TamperingReport,
     KeyExchangeRequest,
     KeyExchangeResponse,
-    KeyExchangeData
+    KeyExchangeData,
 )
 from .middleware import configure_security
 from .websocket_manager import WebSocketManager
@@ -41,6 +41,7 @@ logger = logging.getLogger(__name__)
 templates = Jinja2Templates(directory="templates")
 settings = Settings()
 
+
 class BlueApp:
     def __init__(self) -> None:
         self.app = FastAPI()
@@ -48,18 +49,18 @@ class BlueApp:
         self.session_manager = self.auth.session_manager
         self.ws_manager = WebSocketManager(session_manager=self.session_manager)
         configure_security(self.app)
-        
+
         # Initialize certificate fingerprint with empty string
         self.cert_fingerprint = ""
-        
+
         # Mount static files directory for serving JavaScript
         self.app.mount("/static", StaticFiles(directory="static"), name="static")
-        
+
         # Calculate and store certificate fingerprint
         self._calculate_cert_fingerprint()
-        
+
         self._configure_routes()
-        
+
     def _calculate_cert_fingerprint(self) -> None:
         """Calculate SHA-256 fingerprint of the SSL certificate."""
         try:
@@ -88,7 +89,10 @@ class BlueApp:
         """Serve the TOTP setup page. Disabled after initial setup for security."""
         # Check if setup is already complete
         if self.auth.config.get_setup_complete():
-            raise HTTPException(status_code=403, detail="TOTP setup is already complete. Access to /setup is disabled.")
+            raise HTTPException(
+                status_code=403,
+                detail="TOTP setup is already complete. Access to /setup is disabled.",
+            )
 
         # Generate fresh QR code base64 string using the auth instance
         qr_base64 = self.auth._generate_qr()
@@ -114,7 +118,9 @@ class BlueApp:
         """
         try:
             qr = qrcode.QRCode(version=1, box_size=10, border=5)
-            provisioning_uri = self.auth.totp.provisioning_uri("Bluep Room", issuer_name="Bluep")
+            provisioning_uri = self.auth.totp.provisioning_uri(
+                "Bluep Room", issuer_name="Bluep"
+            )
             qr.add_data(provisioning_uri)
             qr.make(fit=True)
 
@@ -123,21 +129,15 @@ class BlueApp:
             img.save(img_bytes, format="PNG")
             img_bytes.seek(0)
 
-            return Response(
-                content=img_bytes.getvalue(),
-                media_type="image/png"
-            )
+            return Response(content=img_bytes.getvalue(), media_type="image/png")
         except Exception as e:
             logger.error(f"Error generating QR code: {e}")
             # Return a simple error image
-            img = Image.new('RGB', (100, 100), color='red')
+            img = Image.new("RGB", (100, 100), color="red")
             img_bytes = BytesIO()
-            img.save(img_bytes, format='PNG')
+            img.save(img_bytes, format="PNG")
             img_bytes.seek(0)
-            return Response(
-                content=img_bytes.getvalue(),
-                media_type="image/png"
-            )
+            return Response(content=img_bytes.getvalue(), media_type="image/png")
 
     async def login(self, request: Request) -> Response:
         """Serve the login page."""
@@ -148,15 +148,15 @@ class BlueApp:
         cookie = request.cookies.get(self.session_manager.cookie_name)
         if not cookie:
             return RedirectResponse(url="/login")
-            
+
         # Verify existing session
         session = self.session_manager.get_session(cookie)
         if not session:
             return RedirectResponse(url="/login")
-            
+
         # User is authenticated, proceed to editor
         logger.debug(f"Using existing session with token: {session.websocket_token}")
-        
+
         # Calculate script lengths for integrity checks
         script_length = self._get_script_length("/static/js/crypto-utils.js")
 
@@ -173,27 +173,27 @@ class BlueApp:
                 "shared_key": self.session_manager.shared_encryption_key,
             },
         )
-        
+
         # Set secure HTTP-only cookie for the token instead of exposing in URL
         expiry = int(time.time() + (60 * 60))  # 1 hour expiration
         if session.websocket_token:
             response.set_cookie(
-                key="bluep_token", 
+                key="bluep_token",
                 value=session.websocket_token,
                 httponly=True,
                 secure=True,
                 samesite="strict",
-                expires=expiry
+                expires=expiry,
             )
-        
+
         return response
-    
+
     async def post(self, request: Request, response: Response) -> Response:
         """Handle POST request for secure TOTP submission"""
         form_data = await request.form()
         key_input = form_data.get("key")
         key = str(key_input) if key_input else ""
-        
+
         if not key:
             return RedirectResponse(url="/login", status_code=303)
 
@@ -206,7 +206,7 @@ class BlueApp:
             # Get the latest session
             latest_session = list(self.session_manager.sessions.values())[-1]
             logger.debug(f"Using session with token: {latest_session.websocket_token}")
-            
+
             # Calculate script lengths for integrity checks
             script_length = self._get_script_length("/static/js/crypto-utils.js")
 
@@ -223,24 +223,24 @@ class BlueApp:
                     "shared_key": self.session_manager.shared_encryption_key,
                 },
             )
-            
+
             # Set secure HTTP-only cookie for the token instead of exposing in URL
             expiry = int(time.time() + (60 * 60))  # 1 hour expiration
             if latest_session.websocket_token:
                 response.set_cookie(
-                    key="bluep_token", 
+                    key="bluep_token",
                     value=latest_session.websocket_token,
                     httponly=True,
                     secure=True,
                     samesite="strict",
-                    expires=expiry
+                    expires=expiry,
                 )
-            
+
             return response
         except Exception as e:
             logger.error(f"Error in post route: {e}", exc_info=True)
             return RedirectResponse(url="/login", status_code=303)
-    
+
     def _get_script_length(self, script_path: str) -> int:
         """Get the length of a script file for integrity checks."""
         try:
@@ -254,14 +254,16 @@ class BlueApp:
         try:
             # Get token from secure cookie instead of URL parameter
             cookies = websocket.cookies
-            token = cookies.get('bluep_token')
+            token = cookies.get("bluep_token")
             if not token:
                 logger.warning("WebSocket connection attempt without token cookie")
                 await websocket.close(code=4000)
                 return
 
             logger.debug(f"WS connect attempt with token from cookie")
-            logger.debug(f"Valid tokens: {list(self.session_manager.websocket_tokens.keys())}")
+            logger.debug(
+                f"Valid tokens: {list(self.session_manager.websocket_tokens.keys())}"
+            )
 
             await self.ws_manager.connect(websocket, token)
 
@@ -283,14 +285,16 @@ class BlueApp:
                 if msg.type == "content" and msg.data is not None:
                     # Store the text content
                     await self.ws_manager.update_shared_text(msg.data)
-                    
+
                     # Create a new message marked as encrypted - client-side key derivation
                     # from the token ensures all clients can decrypt with the right key
                     message_to_broadcast = msg.model_dump(exclude_none=True)
                     message_to_broadcast["encrypted"] = True
-                    
-                    await self.ws_manager.broadcast(message_to_broadcast, exclude=websocket)
-                
+
+                    await self.ws_manager.broadcast(
+                        message_to_broadcast, exclude=websocket
+                    )
+
                 elif msg.type == "file-announce" and msg.fileName:
                     # Handle file announcement from client
                     file_id = msg.fileId or secrets.token_hex(8)
@@ -299,20 +303,24 @@ class BlueApp:
                         file_name=msg.fileName,
                         file_size=msg.fileSize or 0,
                         file_type=msg.fileType or "application/octet-stream",
-                        source_websocket=websocket
+                        source_websocket=websocket,
                     )
-                
+
                 elif msg.type == "file-request" and msg.fileId:
                     # Handle client requesting a file
                     await self.ws_manager.handle_file_request(msg.fileId, websocket)
-                
+
                 elif msg.type == "file-data":
                     # Forward file data chunks to the requesting client
-                    await self.ws_manager.broadcast(msg.model_dump(exclude_none=True), exclude=websocket)
-                    
+                    await self.ws_manager.broadcast(
+                        msg.model_dump(exclude_none=True), exclude=websocket
+                    )
+
                 elif msg.type == "clear-files":
                     # Clear file listings on all clients
-                    await self.ws_manager.broadcast({"type": "clear-files"}, exclude=None)
+                    await self.ws_manager.broadcast(
+                        {"type": "clear-files"}, exclude=None
+                    )
                     # Clear server-side file metadata
                     self.ws_manager.available_files.clear()
 
@@ -329,47 +337,45 @@ class BlueApp:
         try:
             client_data = await request.json()
             verification = CertificateVerification(**client_data)
-            
+
             # For certificate verification, validate the fingerprint match
             expected_fingerprint = verification.expectedFingerprint
             is_valid = True  # Default to true for development ease
-            
+
             # If expected fingerprint is provided, actually check it
             if expected_fingerprint and expected_fingerprint != self.cert_fingerprint:
-                logger.info(f"Certificate fingerprint info: expected {expected_fingerprint}, got {self.cert_fingerprint}")
+                logger.info(
+                    f"Certificate fingerprint info: expected {expected_fingerprint}, got {self.cert_fingerprint}"
+                )
                 # For production, uncomment the following line:
                 # is_valid = False
-            
+
             result = {
-                "valid": is_valid, 
+                "valid": is_valid,
                 "fingerprint": self.cert_fingerprint or "development",
-                "serverTime": int(time.time())
+                "serverTime": int(time.time()),
             }
-            
+
             # Time skew checking
             client_time = verification.clientTime
             server_time = int(time.time() * 1000)
             time_diff = abs(server_time - client_time)
-            
+
             if time_diff > 300000:  # 5 minutes
                 logger.info(f"Time skew: {time_diff}ms")
-            
-                
-            return Response(
-                content=json.dumps(result),
-                media_type="application/json"
-            )
+
+            return Response(content=json.dumps(result), media_type="application/json")
         except Exception as e:
             logger.error(f"Error in certificate verification: {e}")
             return Response(
                 status_code=400,
                 content=json.dumps({"valid": False, "error": str(e)}),
-                media_type="application/json"
+                media_type="application/json",
             )
-    
+
     async def key_exchange(self, request: Request) -> Response:
         """Handle key exchange - client uses token-based key derivation
-        
+
         Note: The client will derive its encryption key from the token,
         so we don't actually need to exchange keys, but we keep the endpoint
         for compatibility and future enhancements.
@@ -378,47 +384,50 @@ class BlueApp:
             # Parse request data
             data = await request.json()
             key_request = KeyExchangeRequest(**data)
-            
+
             # Verify token
-            session_id = self.session_manager.validate_websocket_token(key_request.token)
+            session_id = self.session_manager.validate_websocket_token(
+                key_request.token
+            )
             if not session_id:
                 raise HTTPException(status_code=403, detail="Invalid token")
-            
+
             # Generate a unique ID for this key exchange for reference
             key_id = secrets.token_hex(8)
-            
+
             # Just acknowledge - we don't need to exchange actual keys
             # since client derives them from the token
             response = KeyExchangeResponse(
                 serverKey=key_request.clientKey,  # Echo back the client's key as acknowledgment
-                keyId=key_id
+                keyId=key_id,
             )
-            
+
             logger.debug(f"Key exchange completed for session {session_id}")
-            
+
             return Response(
-                content=response.model_dump_json(),
-                media_type="application/json"
+                content=response.model_dump_json(), media_type="application/json"
             )
-            
+
         except HTTPException as e:
             raise e
         except Exception as e:
             logger.error(f"Error in key exchange: {e}")
             return Response(
                 status_code=500,
-                content=json.dumps({"error": "Internal server error during key exchange"}),
-                media_type="application/json"
+                content=json.dumps(
+                    {"error": "Internal server error during key exchange"}
+                ),
+                media_type="application/json",
             )
-    
+
     async def tampering_report(self, request: Request) -> Response:
         """Handle tampering reports from clients"""
         try:
             report_data = await request.json()
             report = TamperingReport(**report_data)
-            
+
             logger.warning(f"Tampering detected: {report.model_dump()}")
-            
+
             # Invalidate the session if there's a token
             token = report.token
             if token:
@@ -426,22 +435,25 @@ class BlueApp:
                 if session_id:
                     # Remove all tokens associated with this session
                     tokens_to_remove = []
-                    for session_token, sess_id in self.session_manager.websocket_tokens.items():
+                    for (
+                        session_token,
+                        sess_id,
+                    ) in self.session_manager.websocket_tokens.items():
                         if sess_id == session_id:
                             tokens_to_remove.append(session_token)
-                    
+
                     for token in tokens_to_remove:
                         self.session_manager.websocket_tokens.pop(token, None)
-                    
+
                     # Remove the session
                     if session_id in self.session_manager.sessions:
                         self.session_manager.sessions.pop(session_id)
-            
+
             return Response(status_code=204)
         except Exception as e:
             logger.error(f"Error handling tampering report: {e}")
             return Response(status_code=500)
-    
+
     async def csp_report(self, request: Request) -> Response:
         """Handle CSP violation reports"""
         try:
@@ -451,7 +463,7 @@ class BlueApp:
         except Exception as e:
             logger.error(f"Error handling CSP report: {e}")
             return Response(status_code=500)
-        
+
     async def favicon(self, request: Request, key: Optional[str] = None) -> Response:
         """Serve the favicon, requiring auth via session cookie or key parameter"""
         # No authentication required for favicon.png
@@ -467,15 +479,17 @@ class BlueApp:
             await connection.close()
         sys.exit(0)
 
-
     def main(self) -> None:
         loop = asyncio.new_event_loop()
         asyncio.set_event_loop(loop)
 
         import platform
+
         if platform.system() != "Windows":
             for sig in (signal.SIGTERM, signal.SIGINT):
-                loop.add_signal_handler(sig, lambda s=sig: asyncio.create_task(self.shutdown(s)))
+                loop.add_signal_handler(
+                    sig, lambda s=sig: asyncio.create_task(self.shutdown(s))
+                )
         # On Windows, signal handlers are not supported for SIGTERM/SIGINT in asyncio
 
         print(f"\nSetup page: https://{settings.host_ip}:{settings.port}/setup\n")
@@ -500,6 +514,7 @@ class BlueApp:
 def main() -> None:
     blue_app = BlueApp()
     blue_app.main()
+
 
 if __name__ == "__main__":
     main()

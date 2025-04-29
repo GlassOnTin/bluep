@@ -80,7 +80,9 @@ class SecureConfig:
                     return f.read().strip()
         return str(uuid.UUID(int=uuid.getnode()))
 
-    def save_secret(self, totp_secret: str, setup_complete: Optional[bool] = None) -> None:
+    def save_secret(
+        self, totp_secret: str, setup_complete: Optional[bool] = None
+    ) -> None:
         """Save TOTP secret and setup_complete flag to encrypted configuration.
 
         Args:
@@ -127,4 +129,3 @@ class SecureConfig:
         config: Dict[str, str] = json.loads(self.fernet.decrypt(encrypted))
         config["setup_complete"] = value
         self.config_path.write_bytes(self.fernet.encrypt(json.dumps(config).encode()))
-

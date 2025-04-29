@@ -44,17 +44,17 @@ def test_security_headers():
     # Test with valid host
     response = client.get("/", headers={"host": "testserver"})
     assert response.status_code == 200
-    
+
     # Basic security headers
     assert response.headers["X-Content-Type-Options"] == "nosniff"
     assert response.headers["X-Frame-Options"] == "DENY"
-    
+
     # Enhanced security headers we added
     assert response.headers["X-XSS-Protection"] == "1; mode=block"
     assert response.headers["Referrer-Policy"] == "strict-origin-when-cross-origin"
     assert "max-age=31536000" in response.headers["Strict-Transport-Security"]
     assert "camera=()" in response.headers["Permissions-Policy"]
-    
+
     # Content Security Policy
     csp = response.headers["Content-Security-Policy"]
     assert "default-src 'self'" in csp

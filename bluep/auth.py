@@ -17,6 +17,7 @@ from bluep.session_manager import SessionManager
 
 logger = logging.getLogger(__name__)
 
+
 class TOTPAuth:
     """Handles TOTP-based authentication and rate limiting."""
 

@@ -31,21 +31,25 @@ def configure_security(app: FastAPI) -> None:
         allow_methods=["GET", "POST"],  # Only allow necessary methods
         allow_headers=["Authorization", "Content-Type"],
         expose_headers=["Content-Type"],
-        max_age=3600  # Cache preflight requests for 1 hour
+        max_age=3600,  # Cache preflight requests for 1 hour
     )
 
     # Restrict trusted hosts - prevent host header attacks
     # In production, explicitly list your domain names
     app.add_middleware(
         TrustedHostMiddleware,
-        allowed_hosts=["localhost", "127.0.0.1", "*"]  # Still allowing all for development
+        allowed_hosts=[
+            "localhost",
+            "127.0.0.1",
+            "*",
+        ],  # Still allowing all for development
     )
 
     app.add_middleware(RateLimitMiddleware, rate_limit=100, window=60)
 
     # Generate integrity hashes for JS and CSS assets
     js_files: Dict[str, str] = {}
-    
+
     for script_path in glob.glob("static/js/*.js"):
         try:
             with open(script_path, "rb") as f:
@@ -56,24 +60,28 @@ def configure_security(app: FastAPI) -> None:
                 js_files[basename] = f"sha384-{digest}"
         except Exception as e:
             print(f"Error generating hash for {script_path}: {e}")
-    
+
     @app.middleware("http")
     async def add_security_headers(request: Request, call_next: Callable) -> Response:
         """Add security headers to response."""
         response = await call_next(request)
-        
+
         # Security headers
         response.headers["X-Content-Type-Options"] = "nosniff"
         response.headers["X-Frame-Options"] = "DENY"
         response.headers["X-XSS-Protection"] = "1; mode=block"
         response.headers["Referrer-Policy"] = "strict-origin-when-cross-origin"
-        response.headers["Strict-Transport-Security"] = "max-age=31536000; includeSubDomains"
-        response.headers["Permissions-Policy"] = "camera=(), microphone=(), geolocation=()"
-        
+        response.headers["Strict-Transport-Security"] = (
+            "max-age=31536000; includeSubDomains"
+        )
+        response.headers["Permissions-Policy"] = (
+            "camera=(), microphone=(), geolocation=()"
+        )
+
         # For CSP, when hashes are present, unsafe-inline is ignored
         # Let's remove the integrity hashes and just use unsafe-inline
         script_src = "'self' 'unsafe-inline'"
-        
+
         csp_parts = [
             "default-src 'self'",
             f"script-src {script_src}",  # Include script hashes
@@ -83,14 +91,16 @@ def configure_security(app: FastAPI) -> None:
             "frame-ancestors 'none'",
             "form-action 'self'",
             "base-uri 'self'",
-            "object-src 'none'"
+            "object-src 'none'",
         ]
-        
+
         response.headers["Content-Security-Policy"] = "; ".join(csp_parts)
-        
+
         # Add reporting endpoint for CSP violations
-        response.headers["Report-To"] = '{"group":"csp-endpoint","max_age":10886400,"endpoints":[{"url":"/csp-report"}]}'
-        
+        response.headers["Report-To"] = (
+            '{"group":"csp-endpoint","max_age":10886400,"endpoints":[{"url":"/csp-report"}]}'
+        )
+
         return response
 
 

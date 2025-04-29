@@ -65,14 +65,29 @@ def generate_ssl_certs() -> None:
         if platform.system() == "Windows":
             print("Error: Please generate SSL certificates manually on Windows")
             print("Run the following command in Git Bash or similar:")
-            print("openssl req -x509 -newkey rsa:4096 -nodes -keyout key.pem -out cert.pem -days 365")
+            print(
+                "openssl req -x509 -newkey rsa:4096 -nodes -keyout key.pem -out cert.pem -days 365"
+            )
             sys.exit(1)
         else:
-            run_command([
-                "openssl", "req", "-x509", "-newkey", "rsa:4096", "-nodes",
-                "-keyout", "key.pem", "-out", "cert.pem", "-days", "365",
-                "-subj", "/CN=localhost"
-            ])
+            run_command(
+                [
+                    "openssl",
+                    "req",
+                    "-x509",
+                    "-newkey",
+                    "rsa:4096",
+                    "-nodes",
+                    "-keyout",
+                    "key.pem",
+                    "-out",
+                    "cert.pem",
+                    "-days",
+                    "365",
+                    "-subj",
+                    "/CN=localhost",
+                ]
+            )
 
 
 def install_dependencies(python_path: Path) -> None:

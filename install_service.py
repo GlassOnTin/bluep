@@ -33,7 +33,9 @@ def get_executable_paths() -> tuple[str, str]:
     return python_path, bluep_path
 
 
-def create_service_file(user: str, group: str, python_path: str, bluep_path: str) -> str:
+def create_service_file(
+    user: str, group: str, python_path: str, bluep_path: str
+) -> str:
     """Create the systemd service unit file content.
 
     Args:
@@ -85,7 +87,7 @@ def install_service(service_content: str) -> None:
     service_path = "/etc/systemd/system/bluep.service"
 
     try:
-        with open(service_path, 'w') as f:
+        with open(service_path, "w") as f:
             f.write(service_content)
 
         # Set correct permissions
@@ -103,9 +105,7 @@ def install_service(service_content: str) -> None:
 def check_systemd() -> None:
     """Check if systemd is available on the system."""
     try:
-        subprocess.run(["systemctl", "--version"],
-                      check=True,
-                      capture_output=True)
+        subprocess.run(["systemctl", "--version"], check=True, capture_output=True)
     except (subprocess.CalledProcessError, FileNotFoundError):
         print("Error: systemd is not available on this system")
         sys.exit(1)
@@ -143,8 +143,11 @@ def main() -> None:
 
     # Parse command line arguments
     parser = argparse.ArgumentParser(description="Install bluep as a systemd service")
-    parser.add_argument('--user', default=os.environ.get('SUDO_USER', 'root'),
-                       help='User to run the service as (default: current user)')
+    parser.add_argument(
+        "--user",
+        default=os.environ.get("SUDO_USER", "root"),
+        help="User to run the service as (default: current user)",
+    )
     args = parser.parse_args()
 
     # Check systemd availability
