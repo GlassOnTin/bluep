@@ -85,9 +85,16 @@ class BlueApp:
         self.app.post("/csp-report")(self.csp_report)
 
     async def setup(self, request: Request) -> Response:
-        """Serve the TOTP setup page."""
+        """Serve the TOTP setup page. Disabled after initial setup for security."""
+        # Check if setup is already complete
+        if self.auth.config.get_setup_complete():
+            raise HTTPException(status_code=403, detail="TOTP setup is already complete. Access to /setup is disabled.")
+
         # Generate fresh QR code base64 string using the auth instance
         qr_base64 = self.auth._generate_qr()
+
+        # Mark setup as complete after serving the page
+        self.auth.config.set_setup_complete(True)
 
         return templates.TemplateResponse(
             "setup.html",
@@ -465,8 +472,11 @@ class BlueApp:
         loop = asyncio.new_event_loop()
         asyncio.set_event_loop(loop)
 
-        for sig in (signal.SIGTERM, signal.SIGINT):
-            loop.add_signal_handler(sig, lambda s=sig: asyncio.create_task(self.shutdown(s)))
+        import platform
+        if platform.system() != "Windows":
+            for sig in (signal.SIGTERM, signal.SIGINT):
+                loop.add_signal_handler(sig, lambda s=sig: asyncio.create_task(self.shutdown(s)))
+        # On Windows, signal handlers are not supported for SIGTERM/SIGINT in asyncio
 
         print(f"\nSetup page: https://{settings.host_ip}:{settings.port}/setup\n")
         print(f"Server running at https://{settings.host_ip}:{settings.port}\n")
@@ -481,7 +491,11 @@ class BlueApp:
             timeout_graceful_shutdown=0,
         )
         server = uvicorn.Server(config=config)
-        server.run()
+        try:
+            server.run()
+        except KeyboardInterrupt:
+            print("\nServer stopped by user (KeyboardInterrupt)")
+
 
 def main() -> None:
     blue_app = BlueApp()

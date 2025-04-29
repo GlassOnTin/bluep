@@ -80,13 +80,26 @@ class SecureConfig:
                     return f.read().strip()
         return str(uuid.UUID(int=uuid.getnode()))
 
-    def save_secret(self, totp_secret: str) -> None:
-        """Save TOTP secret to encrypted configuration.
+    def save_secret(self, totp_secret: str, setup_complete: Optional[bool] = None) -> None:
+        """Save TOTP secret and setup_complete flag to encrypted configuration.
 
         Args:
             totp_secret: TOTP secret to store
+            setup_complete: Optional setup complete flag
         """
         config = {"totp_secret": totp_secret}
+        if setup_complete is not None:
+            config["setup_complete"] = setup_complete
+        else:
+            # Preserve existing setup_complete flag if present
+            if self.config_path.exists():
+                try:
+                    encrypted = self.config_path.read_bytes()
+                    prev_config = json.loads(self.fernet.decrypt(encrypted))
+                    if "setup_complete" in prev_config:
+                        config["setup_complete"] = prev_config["setup_complete"]
+                except Exception:
+                    pass
         encrypted = self.fernet.encrypt(json.dumps(config).encode())
         self.config_path.write_bytes(encrypted)
 
@@ -96,5 +109,22 @@ class SecureConfig:
             return None
         encrypted = self.config_path.read_bytes()
         config: Dict[str, str] = json.loads(self.fernet.decrypt(encrypted))
-        print(config["totp_secret"])
-        return config["totp_secret"]
+        return config.get("totp_secret")
+
+    def get_setup_complete(self) -> bool:
+        """Return True if setup has been completed (flag set)."""
+        if not self.config_path.exists():
+            return False
+        encrypted = self.config_path.read_bytes()
+        config: Dict[str, str] = json.loads(self.fernet.decrypt(encrypted))
+        return bool(config.get("setup_complete", False))
+
+    def set_setup_complete(self, value: bool = True) -> None:
+        """Set the setup_complete flag in the config."""
+        if not self.config_path.exists():
+            return
+        encrypted = self.config_path.read_bytes()
+        config: Dict[str, str] = json.loads(self.fernet.decrypt(encrypted))
+        config["setup_complete"] = value
+        self.config_path.write_bytes(self.fernet.encrypt(json.dumps(config).encode()))
+
