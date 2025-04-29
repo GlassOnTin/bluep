@@ -118,11 +118,11 @@ if ($taskExists) {
 }
 
 try {
-    $pythonExe = Join-Path $projectPath ".venv\Scripts\pythonw.exe"
+    $pythonExe = Join-Path $projectPath ".venv\Scripts\python.exe"
     $bluepModule = Join-Path $projectPath "bluep\bluep.py"
     
-    # Create action to run bluep
-    $action = New-ScheduledTaskAction -Execute $pythonExe -Argument "-m bluep.bluep" -WorkingDirectory $projectPath
+    # Create action to run bluep with logging
+    $action = New-ScheduledTaskAction -Execute $pythonExe -Argument "-m bluep.bluep > bluep_service.log 2>&1" -WorkingDirectory $projectPath
     
     # Create trigger to run at startup and when user logs in
     $triggerStartup = New-ScheduledTaskTrigger -AtStartup
