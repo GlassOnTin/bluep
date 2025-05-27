@@ -1,0 +1,640 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>bluep terminal</title>
+    <link rel="icon" type="image/png" href="/favicon.png">
+    <style>
+        body, html {
+            margin: 0;
+            padding: 0;
+            height: 100vh;
+            width: 100vw;
+            background: #1a1a2e;
+            overflow: hidden;
+            display: flex;
+            flex-direction: column;
+            font-family: 'Monaco', 'Menlo', 'Ubuntu Mono', monospace;
+        }
+        
+        #terminal-container {
+            flex: 1;
+            display: flex;
+            flex-direction: column;
+            background: #0f0f23;
+            margin: 10px;
+            border-radius: 8px;
+            box-shadow: 0 4px 6px rgba(0, 0, 0, 0.3);
+            overflow: hidden;
+        }
+        
+        #terminal-header {
+            background: #16213e;
+            padding: 10px 15px;
+            color: #fff;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            border-bottom: 1px solid #2a2a4e;
+        }
+        
+        #terminal-tabs {
+            display: flex;
+            gap: 5px;
+        }
+        
+        .terminal-tab {
+            padding: 5px 15px;
+            background: #1a1a2e;
+            color: #aaa;
+            border-radius: 5px 5px 0 0;
+            cursor: pointer;
+            transition: all 0.2s;
+            display: flex;
+            align-items: center;
+            gap: 5px;
+        }
+        
+        .terminal-tab.active {
+            background: #0f0f23;
+            color: #fff;
+        }
+        
+        .terminal-tab:hover {
+            background: #2a2a4e;
+        }
+        
+        .terminal-tab .close-btn {
+            font-size: 12px;
+            opacity: 0.6;
+            transition: opacity 0.2s;
+        }
+        
+        .terminal-tab .close-btn:hover {
+            opacity: 1;
+        }
+        
+        #new-terminal-btn {
+            padding: 5px 10px;
+            background: #2a2a4e;
+            color: #fff;
+            border: none;
+            border-radius: 5px;
+            cursor: pointer;
+            transition: background 0.2s;
+        }
+        
+        #new-terminal-btn:hover {
+            background: #3a3a5e;
+        }
+        
+        #terminal-output {
+            flex: 1;
+            overflow-y: auto;
+            padding: 10px;
+            background: #0f0f23;
+            color: #e8e8e8;
+            font-size: 14px;
+            line-height: 1.5;
+            white-space: pre-wrap;
+            word-wrap: break-word;
+        }
+        
+        #terminal-input-container {
+            display: flex;
+            background: #16213e;
+            border-top: 1px solid #2a2a4e;
+            padding: 10px;
+            align-items: center;
+        }
+        
+        #terminal-prompt {
+            color: #4fc3f7;
+            margin-right: 8px;
+            font-weight: bold;
+        }
+        
+        #terminal-input {
+            flex: 1;
+            background: transparent;
+            border: none;
+            outline: none;
+            color: #e8e8e8;
+            font-family: inherit;
+            font-size: 14px;
+        }
+        
+        #command-selector {
+            margin: 10px;
+            display: flex;
+            gap: 10px;
+            flex-wrap: wrap;
+        }
+        
+        .command-btn {
+            padding: 8px 16px;
+            background: #2a2a4e;
+            color: #fff;
+            border: none;
+            border-radius: 5px;
+            cursor: pointer;
+            transition: all 0.2s;
+            font-size: 14px;
+        }
+        
+        .command-btn:hover {
+            background: #3a3a5e;
+            transform: translateY(-1px);
+        }
+        
+        .command-btn.active {
+            background: #4fc3f7;
+            color: #0f0f23;
+        }
+        
+        /* ANSI color support */
+        .ansi-black { color: #000000; }
+        .ansi-red { color: #cd3131; }
+        .ansi-green { color: #0dbc79; }
+        .ansi-yellow { color: #e5e510; }
+        .ansi-blue { color: #2472c8; }
+        .ansi-magenta { color: #bc3fbc; }
+        .ansi-cyan { color: #11a8cd; }
+        .ansi-white { color: #e5e5e5; }
+        
+        .ansi-bright-black { color: #666666; }
+        .ansi-bright-red { color: #f14c4c; }
+        .ansi-bright-green { color: #23d18b; }
+        .ansi-bright-yellow { color: #f5f543; }
+        .ansi-bright-blue { color: #3b8eea; }
+        .ansi-bright-magenta { color: #d670d6; }
+        .ansi-bright-cyan { color: #29b8db; }
+        .ansi-bright-white { color: #ffffff; }
+        
+        .ansi-bg-black { background-color: #000000; }
+        .ansi-bg-red { background-color: #cd3131; }
+        .ansi-bg-green { background-color: #0dbc79; }
+        .ansi-bg-yellow { background-color: #e5e510; }
+        .ansi-bg-blue { background-color: #2472c8; }
+        .ansi-bg-magenta { background-color: #bc3fbc; }
+        .ansi-bg-cyan { background-color: #11a8cd; }
+        .ansi-bg-white { background-color: #e5e5e5; }
+        
+        /* Scrollbar styling */
+        #terminal-output::-webkit-scrollbar {
+            width: 8px;
+        }
+        
+        #terminal-output::-webkit-scrollbar-track {
+            background: #16213e;
+        }
+        
+        #terminal-output::-webkit-scrollbar-thumb {
+            background: #2a2a4e;
+            border-radius: 4px;
+        }
+        
+        #terminal-output::-webkit-scrollbar-thumb:hover {
+            background: #3a3a5e;
+        }
+    </style>
+    <script src="/static/js/crypto-utils.js"></script>
+</head>
+<body>
+    <div id="command-selector">
+        <button class="command-btn" data-command="bash">Bash</button>
+        <button class="command-btn" data-command="python">Python</button>
+        <button class="command-btn" data-command="node">Node.js</button>
+        <button class="command-btn" data-command="claude">Claude</button>
+    </div>
+    
+    <div id="terminal-container">
+        <div id="terminal-header">
+            <div id="terminal-tabs"></div>
+            <button id="new-terminal-btn">+ New Terminal</button>
+        </div>
+        <div id="terminal-output"></div>
+        <div id="terminal-input-container">
+            <span id="terminal-prompt">$</span>
+            <input type="text" id="terminal-input" autofocus>
+        </div>
+    </div>
+    
+    <script>
+        // Terminal state
+        let terminals = {};
+        let activeTerminalId = null;
+        let ws = null;
+        let isConnected = false;
+        const token = "{{token}}";
+        const sharedKeyStr = "{{shared_key}}";
+        let encryptionKey = null;
+        
+        // Initialize encryption
+        (async function() {
+            try {
+                sharedSecret = await createKeyFromSharedString(sharedKeyStr);
+                console.log("Shared encryption key setup completed");
+            } catch (e) {
+                console.warn("Error with shared key:", e);
+                sharedSecret = await fallbackToTokenBasedKey(token);
+            }
+            
+            // Initialize WebSocket
+            initializeWebSocket();
+        })();
+        
+        function initializeWebSocket() {
+            const wsUrl = `wss://${window.location.host}/ws`;
+            ws = new WebSocket(wsUrl);
+            
+            ws.onopen = () => {
+                isConnected = true;
+                console.log('Connected to server');
+                
+                // Request process list
+                ws.send(JSON.stringify({ type: "process-list" }));
+            };
+            
+            ws.onclose = (event) => {
+                console.log('WebSocket closed:', event.code, event.reason);
+                isConnected = false;
+                if (event.code === 403) {
+                    window.location.href = '/login';
+                }
+            };
+            
+            ws.onerror = (error) => {
+                console.error('WebSocket error:', error);
+            };
+            
+            ws.onmessage = async (event) => {
+                const msg = JSON.parse(event.data);
+                console.log('Received message type:', msg.type);
+                
+                if (msg.type === "ping") {
+                    ws.send(JSON.stringify({type: "pong"}));
+                } else if (msg.type === "process-status") {
+                    handleProcessStatus(msg);
+                } else if (msg.type === "process-output") {
+                    handleProcessOutput(msg);
+                } else if (msg.type === "process-list") {
+                    handleProcessList(msg);
+                } else if (msg.type === "error") {
+                    showError(msg.error);
+                }
+            };
+        }
+        
+        // Command selector
+        document.querySelectorAll('.command-btn').forEach(btn => {
+            btn.addEventListener('click', () => {
+                const command = btn.dataset.command;
+                spawnTerminal(command);
+                
+                // Update active button
+                document.querySelectorAll('.command-btn').forEach(b => b.classList.remove('active'));
+                btn.classList.add('active');
+            });
+        });
+        
+        // New terminal button
+        document.getElementById('new-terminal-btn').addEventListener('click', () => {
+            const activeBtn = document.querySelector('.command-btn.active');
+            const command = activeBtn ? activeBtn.dataset.command : 'bash';
+            spawnTerminal(command);
+        });
+        
+        // Terminal input
+        const terminalInput = document.getElementById('terminal-input');
+        const terminalOutput = document.getElementById('terminal-output');
+        
+        terminalInput.addEventListener('keydown', (e) => {
+            if (e.key === 'Enter') {
+                const input = terminalInput.value;
+                if (input.trim() && activeTerminalId && isConnected) {
+                    // Send input to process
+                    ws.send(JSON.stringify({
+                        type: "process-input",
+                        processId: activeTerminalId,
+                        data: input + '\n'
+                    }));
+                    
+                    // Clear input
+                    terminalInput.value = '';
+                }
+            } else if (e.key === 'c' && e.ctrlKey) {
+                // Send Ctrl+C
+                if (activeTerminalId && isConnected) {
+                    ws.send(JSON.stringify({
+                        type: "process-input",
+                        processId: activeTerminalId,
+                        data: '\x03'
+                    }));
+                }
+            }
+        });
+        
+        // Spawn a new terminal
+        function spawnTerminal(command) {
+            if (!isConnected) {
+                showError("Not connected to server");
+                return;
+            }
+            
+            ws.send(JSON.stringify({
+                type: "process-spawn",
+                command: command
+            }));
+        }
+        
+        // Handle process status updates
+        function handleProcessStatus(msg) {
+            const { processId, status, command } = msg;
+            
+            if (status === "spawned") {
+                // Create new terminal tab
+                terminals[processId] = {
+                    id: processId,
+                    command: command,
+                    output: [],
+                    active: true
+                };
+                
+                createTerminalTab(processId, command);
+                switchToTerminal(processId);
+                
+                // Send initial terminal size
+                const cols = Math.floor(terminalOutput.clientWidth / 8); // Approximate char width
+                const rows = Math.floor(terminalOutput.clientHeight / 20); // Approximate line height
+                
+                ws.send(JSON.stringify({
+                    type: "process-resize",
+                    processId: processId,
+                    cols: cols,
+                    rows: rows
+                }));
+            } else if (status === "exited" || status === "terminated") {
+                // Mark terminal as inactive
+                if (terminals[processId]) {
+                    terminals[processId].active = false;
+                    updateTerminalTab(processId);
+                    appendToTerminal(processId, `\n[Process ${status}]`);
+                }
+            }
+        }
+        
+        // Handle process output
+        function handleProcessOutput(msg) {
+            const { processId, outputData } = msg;
+            
+            if (!outputData || !terminals[processId]) return;
+            
+            try {
+                // Decode base64 output
+                const decoded = atob(outputData);
+                const output = new TextDecoder('utf-8').decode(
+                    Uint8Array.from(decoded, c => c.charCodeAt(0))
+                );
+                
+                appendToTerminal(processId, output);
+            } catch (e) {
+                console.error("Failed to decode output:", e);
+            }
+        }
+        
+        // Handle process list
+        function handleProcessList(msg) {
+            const { processes } = msg;
+            
+            if (!processes || processes.length === 0) return;
+            
+            // Restore existing terminals
+            processes.forEach(proc => {
+                if (!terminals[proc.process_id]) {
+                    terminals[proc.process_id] = {
+                        id: proc.process_id,
+                        command: proc.command,
+                        output: [],
+                        active: proc.is_alive
+                    };
+                    
+                    createTerminalTab(proc.process_id, proc.command);
+                }
+            });
+            
+            // Activate first terminal if none active
+            if (!activeTerminalId && Object.keys(terminals).length > 0) {
+                switchToTerminal(Object.keys(terminals)[0]);
+            }
+        }
+        
+        // Create terminal tab
+        function createTerminalTab(processId, command) {
+            const tabsContainer = document.getElementById('terminal-tabs');
+            
+            const tab = document.createElement('div');
+            tab.className = 'terminal-tab';
+            tab.dataset.processId = processId;
+            tab.innerHTML = `
+                <span>${command}</span>
+                <span class="close-btn">×</span>
+            `;
+            
+            tab.addEventListener('click', (e) => {
+                if (e.target.classList.contains('close-btn')) {
+                    terminateProcess(processId);
+                } else {
+                    switchToTerminal(processId);
+                }
+            });
+            
+            tabsContainer.appendChild(tab);
+        }
+        
+        // Update terminal tab appearance
+        function updateTerminalTab(processId) {
+            const tab = document.querySelector(`.terminal-tab[data-process-id="${processId}"]`);
+            if (tab && terminals[processId] && !terminals[processId].active) {
+                tab.style.opacity = '0.6';
+            }
+        }
+        
+        // Switch to a terminal
+        function switchToTerminal(processId) {
+            if (!terminals[processId]) return;
+            
+            activeTerminalId = processId;
+            
+            // Update tab appearance
+            document.querySelectorAll('.terminal-tab').forEach(tab => {
+                tab.classList.remove('active');
+            });
+            const activeTab = document.querySelector(`.terminal-tab[data-process-id="${processId}"]`);
+            if (activeTab) {
+                activeTab.classList.add('active');
+            }
+            
+            // Display output
+            displayTerminalOutput(processId);
+            
+            // Focus input
+            terminalInput.focus();
+        }
+        
+        // Display terminal output
+        function displayTerminalOutput(processId) {
+            const terminal = terminals[processId];
+            if (!terminal) return;
+            
+            terminalOutput.innerHTML = '';
+            terminal.output.forEach(line => {
+                const span = document.createElement('span');
+                span.innerHTML = ansiToHtml(line);
+                terminalOutput.appendChild(span);
+            });
+            
+            // Scroll to bottom
+            terminalOutput.scrollTop = terminalOutput.scrollHeight;
+        }
+        
+        // Append output to terminal
+        function appendToTerminal(processId, output) {
+            const terminal = terminals[processId];
+            if (!terminal) return;
+            
+            // Split output into lines and store
+            const lines = output.split('\n');
+            if (lines.length > 0 && terminal.output.length > 0) {
+                // Append to last line if it doesn't end with newline
+                terminal.output[terminal.output.length - 1] += lines[0];
+                lines.shift();
+            }
+            terminal.output.push(...lines);
+            
+            // Limit output buffer
+            const maxLines = 10000;
+            if (terminal.output.length > maxLines) {
+                terminal.output = terminal.output.slice(-maxLines);
+            }
+            
+            // Update display if this is the active terminal
+            if (processId === activeTerminalId) {
+                displayTerminalOutput(processId);
+            }
+        }
+        
+        // Terminate a process
+        function terminateProcess(processId) {
+            if (!isConnected) return;
+            
+            ws.send(JSON.stringify({
+                type: "process-terminate",
+                processId: processId
+            }));
+            
+            // Remove tab
+            const tab = document.querySelector(`.terminal-tab[data-process-id="${processId}"]`);
+            if (tab) {
+                tab.remove();
+            }
+            
+            // Remove from terminals
+            delete terminals[processId];
+            
+            // Switch to another terminal if this was active
+            if (processId === activeTerminalId) {
+                const remainingIds = Object.keys(terminals);
+                if (remainingIds.length > 0) {
+                    switchToTerminal(remainingIds[0]);
+                } else {
+                    activeTerminalId = null;
+                    terminalOutput.innerHTML = '';
+                }
+            }
+        }
+        
+        // Convert ANSI escape codes to HTML
+        function ansiToHtml(text) {
+            // Basic ANSI escape code regex
+            const ansiRegex = /\x1b\[([0-9;]+)m/g;
+            let result = text;
+            
+            // Replace ANSI codes with span tags
+            result = result.replace(ansiRegex, (match, codes) => {
+                const codeArray = codes.split(';').map(c => parseInt(c));
+                let classes = [];
+                
+                codeArray.forEach(code => {
+                    if (code === 0) {
+                        // Reset
+                        return '</span>';
+                    } else if (code >= 30 && code <= 37) {
+                        // Foreground colors
+                        const colors = ['black', 'red', 'green', 'yellow', 'blue', 'magenta', 'cyan', 'white'];
+                        classes.push(`ansi-${colors[code - 30]}`);
+                    } else if (code >= 40 && code <= 47) {
+                        // Background colors
+                        const colors = ['black', 'red', 'green', 'yellow', 'blue', 'magenta', 'cyan', 'white'];
+                        classes.push(`ansi-bg-${colors[code - 40]}`);
+                    } else if (code >= 90 && code <= 97) {
+                        // Bright foreground colors
+                        const colors = ['black', 'red', 'green', 'yellow', 'blue', 'magenta', 'cyan', 'white'];
+                        classes.push(`ansi-bright-${colors[code - 90]}`);
+                    }
+                });
+                
+                return classes.length > 0 ? `<span class="${classes.join(' ')}">` : '';
+            });
+            
+            // Escape HTML entities
+            result = result
+                .replace(/&/g, '&amp;')
+                .replace(/</g, '&lt;')
+                .replace(/>/g, '&gt;');
+            
+            return result;
+        }
+        
+        // Show error message
+        function showError(message) {
+            const errorDiv = document.createElement('div');
+            errorDiv.style.cssText = `
+                position: fixed;
+                bottom: 20px;
+                right: 20px;
+                background: #f44336;
+                color: white;
+                padding: 15px 20px;
+                border-radius: 5px;
+                box-shadow: 0 2px 10px rgba(0,0,0,0.3);
+                z-index: 1000;
+            `;
+            errorDiv.textContent = message;
+            document.body.appendChild(errorDiv);
+            
+            setTimeout(() => {
+                document.body.removeChild(errorDiv);
+            }, 5000);
+        }
+        
+        // Handle window resize
+        let resizeTimeout;
+        window.addEventListener('resize', () => {
+            clearTimeout(resizeTimeout);
+            resizeTimeout = setTimeout(() => {
+                if (activeTerminalId && isConnected) {
+                    const cols = Math.floor(terminalOutput.clientWidth / 8);
+                    const rows = Math.floor(terminalOutput.clientHeight / 20);
+                    
+                    ws.send(JSON.stringify({
+                        type: "process-resize",
+                        processId: activeTerminalId,
+                        cols: cols,
+                        rows: rows
+                    }));
+                }
+            }, 300);
+        });
+    </script>
+</body>
+</html>

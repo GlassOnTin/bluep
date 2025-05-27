@@ -8,9 +8,8 @@ import json
 import time
 import secrets
 import hashlib
-import base64
 from io import BytesIO
-from typing import Optional, Dict, Any, Tuple, List, Union
+from typing import Optional
 
 from fastapi import FastAPI, WebSocket, Request, HTTPException, WebSocketDisconnect
 from fastapi.responses import Response, RedirectResponse
@@ -19,8 +18,6 @@ from fastapi.staticfiles import StaticFiles
 from PIL import Image
 import uvicorn
 import qrcode
-from cryptography.hazmat.primitives.asymmetric import ec
-from cryptography.hazmat.primitives import serialization
 
 from .auth import TOTPAuth
 from .config import Settings
@@ -30,7 +27,6 @@ from .models import (
     TamperingReport,
     KeyExchangeRequest,
     KeyExchangeResponse,
-    KeyExchangeData,
 )
 from .middleware import configure_security
 from .websocket_manager import WebSocketManager
@@ -60,6 +56,16 @@ class BlueApp:
         self._calculate_cert_fingerprint()
 
         self._configure_routes()
+        
+        # Add startup task
+        async def startup_task():
+            """Start background tasks on startup."""
+            asyncio.create_task(self.ws_manager.process_manager.monitor_processes())
+        
+        # Schedule startup task
+        @self.app.on_event("startup")
+        async def startup_event():
+            await startup_task()
 
     def _calculate_cert_fingerprint(self) -> None:
         """Calculate SHA-256 fingerprint of the SSL certificate."""
@@ -78,6 +84,7 @@ class BlueApp:
         self.app.get("/qr-raw")(self.qr_raw)
         self.app.get("/setup")(self.setup)
         self.app.get("/login")(self.login)
+        self.app.get("/terminal")(self.terminal)
         self.app.get("/favicon.png")(self.favicon)
         self.app.websocket("/ws")(self.websocket_endpoint)
         self.app.post("/verify-cert")(self.verify_certificate)
@@ -142,6 +149,26 @@ class BlueApp:
     async def login(self, request: Request) -> Response:
         """Serve the login page."""
         return templates.TemplateResponse("login.html", {"request": request})
+    
+    async def terminal(self, request: Request) -> Response:
+        """Serve the terminal page."""
+        # Check authentication
+        cookie = request.cookies.get(self.session_manager.cookie_name)
+        if not cookie:
+            return RedirectResponse(url="/login", status_code=303)
+            
+        session = self.session_manager.get_session(cookie)
+        if not session:
+            return RedirectResponse(url="/login", status_code=303)
+            
+        return templates.TemplateResponse(
+            "terminal.html",
+            {
+                "request": request,
+                "token": session.websocket_token,
+                "shared_key": self.session_manager.shared_encryption_key,
+            }
+        )
 
     async def get(self, request: Request, response: Response) -> Response:
         """Handle GET request to root - check if user is already authenticated via cookie"""
@@ -174,17 +201,8 @@ class BlueApp:
             },
         )
 
-        # Set secure HTTP-only cookie for the token instead of exposing in URL
-        expiry = int(time.time() + (60 * 60))  # 1 hour expiration
-        if session.websocket_token:
-            response.set_cookie(
-                key="bluep_token",
-                value=session.websocket_token,
-                httponly=True,
-                secure=True,
-                samesite="strict",
-                expires=expiry,
-            )
+        # Cookie is already set by session_manager.create_session()
+        # No need to set it again here
 
         return response
 
@@ -210,8 +228,11 @@ class BlueApp:
             # Calculate script lengths for integrity checks
             script_length = self._get_script_length("/static/js/crypto-utils.js")
 
-            # Set a cookie with the token instead of passing it in the template
-            response = templates.TemplateResponse(
+            # Get the session ID that was just created
+            session_id = list(self.session_manager.sessions.keys())[-1]
+            
+            # Create the template response
+            template_response = templates.TemplateResponse(
                 "editor.html",
                 {
                     "request": request,
@@ -224,19 +245,10 @@ class BlueApp:
                 },
             )
 
-            # Set secure HTTP-only cookie for the token instead of exposing in URL
-            expiry = int(time.time() + (60 * 60))  # 1 hour expiration
-            if latest_session.websocket_token:
-                response.set_cookie(
-                    key="bluep_token",
-                    value=latest_session.websocket_token,
-                    httponly=True,
-                    secure=True,
-                    samesite="strict",
-                    expires=expiry,
-                )
+            # Set the session cookie on the new response
+            self.session_manager._set_cookie(template_response, session_id)
 
-            return response
+            return template_response
         except Exception as e:
             logger.error(f"Error in post route: {e}", exc_info=True)
             return RedirectResponse(url="/login", status_code=303)
@@ -252,20 +264,23 @@ class BlueApp:
 
     async def websocket_endpoint(self, websocket: WebSocket) -> None:
         try:
-            # Get token from secure cookie instead of URL parameter
+            # Get session ID from secure cookie
             cookies = websocket.cookies
-            token = cookies.get("bluep_token")
-            if not token:
-                logger.warning("WebSocket connection attempt without token cookie")
+            session_id = cookies.get(self.session_manager.cookie_name)
+            if not session_id:
+                logger.warning("WebSocket connection attempt without session cookie")
                 await websocket.close(code=4000)
                 return
 
-            logger.debug(f"WS connect attempt with token from cookie")
-            logger.debug(
-                f"Valid tokens: {list(self.session_manager.websocket_tokens.keys())}"
-            )
+            # Get the session and its websocket token
+            session = self.session_manager.get_session(session_id)
+            if not session or not session.websocket_token:
+                logger.warning("WebSocket connection attempt with invalid session")
+                await websocket.close(code=4001)
+                return
 
-            await self.ws_manager.connect(websocket, token)
+
+            await self.ws_manager.connect(websocket, session.websocket_token)
 
             if websocket not in self.ws_manager.active_connections:
                 logger.warning("WebSocket connection rejected - invalid token")
@@ -323,6 +338,26 @@ class BlueApp:
                     )
                     # Clear server-side file metadata
                     self.ws_manager.available_files.clear()
+                    
+                elif msg.type == "process-spawn" and msg.command:
+                    # Handle process spawn request
+                    await self.ws_manager.handle_process_spawn(websocket, msg.command)
+                    
+                elif msg.type == "process-input" and msg.processId and msg.data is not None:
+                    # Handle process input
+                    await self.ws_manager.handle_process_input(websocket, msg.processId, msg.data)
+                    
+                elif msg.type == "process-resize" and msg.processId and msg.cols and msg.rows:
+                    # Handle terminal resize
+                    await self.ws_manager.handle_process_resize(websocket, msg.processId, msg.cols, msg.rows)
+                    
+                elif msg.type == "process-terminate" and msg.processId:
+                    # Handle process termination
+                    await self.ws_manager.handle_process_terminate(websocket, msg.processId)
+                    
+                elif msg.type == "process-list":
+                    # Handle process list request
+                    await self.ws_manager.handle_process_list(websocket)
 
         except WebSocketDisconnect:
             if websocket in self.ws_manager.active_connections:
@@ -465,8 +500,17 @@ class BlueApp:
             return Response(status_code=500)
 
     async def favicon(self, request: Request, key: Optional[str] = None) -> Response:
-        """Serve the favicon, requiring auth via session cookie or key parameter"""
-        # No authentication required for favicon.png
+        """Serve the favicon, requiring auth via session cookie or key parameter. Returns 403 if not authenticated."""
+        # Check for valid session cookie
+        session_cookie = request.cookies.get(self.session_manager.cookie_name)
+        valid_session = False
+        if session_cookie and self.session_manager.get_session(session_cookie):
+            valid_session = True
+        # Check for valid TOTP key
+        elif key and self.auth.verify(key):
+            valid_session = True
+        if not valid_session:
+            return Response(status_code=403)
         img = Image.new("RGB", (32, 32), settings.blue_color)
         buffer = BytesIO()
         img.save(buffer, format="PNG")

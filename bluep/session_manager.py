@@ -8,7 +8,7 @@ import secrets
 from datetime import datetime, timedelta
 from typing import Dict, Optional
 import logging
-from fastapi import Response, Cookie
+from fastapi import Response
 from .models import SessionData, ConnectionState
 
 logger = logging.getLogger(__name__)
@@ -76,6 +76,7 @@ class SessionManager:
             httponly=True,
             secure=True,
             samesite="strict",
+            path="/",  # Ensure cookie is available on all paths
         )
 
     def get_session(

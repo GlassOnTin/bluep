@@ -4,10 +4,11 @@ This module defines the core data structures used for session management and
 websocket communication in the collaborative text editor.
 """
 
-from enum import Enum
-from typing import Optional, Literal, Any, Dict, Union, List
-from pydantic import BaseModel, field_validator, ValidationInfo
 from datetime import datetime
+from enum import Enum
+from typing import Any, Dict, List, Literal, Optional, Union
+
+from pydantic import BaseModel, field_validator, ValidationInfo
 
 
 class ConnectionState(Enum):
@@ -50,6 +51,13 @@ class WebSocketMessage(BaseModel):
         "file-request",
         "file-data",
         "clear-files",
+        "process-spawn",
+        "process-input",
+        "process-output",
+        "process-resize",
+        "process-terminate",
+        "process-list",
+        "process-status",
     ]
     data: Optional[str] = None
     x: Optional[int] = None
@@ -65,6 +73,12 @@ class WebSocketMessage(BaseModel):
     fileType: Optional[str] = None  # MIME type
     fileChunk: Optional[int] = None  # Chunk number for file transfers
     totalChunks: Optional[int] = None  # Total chunks for file transfers
+    processId: Optional[str] = None  # Process identifier
+    command: Optional[str] = None  # Command to spawn
+    cols: Optional[int] = None  # Terminal columns for resize
+    rows: Optional[int] = None  # Terminal rows for resize
+    outputData: Optional[str] = None  # Base64 encoded process output
+    processes: Optional[List[Dict[str, Any]]] = None  # List of processes
 
     @field_validator("data")
     def validate_data(cls, v: Optional[str], info: ValidationInfo) -> str:
