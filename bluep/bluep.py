@@ -618,8 +618,12 @@ class BlueApp:
     async def detailed_health_check(self, request: Request) -> Response:
         """Detailed health check with subsystem status."""
         # Check authentication - requires valid session
-        session_token = request.cookies.get("session_token")
-        if not session_token or not self.session_manager.validate_session_token(session_token):
+        session_cookie = request.cookies.get(self.session_manager.cookie_name)
+        if not session_cookie:
+            raise HTTPException(status_code=401, detail="Authentication required")
+        
+        session = self.session_manager.get_session(session_cookie)
+        if not session:
             raise HTTPException(status_code=401, detail="Authentication required")
         
         health_data = {
