@@ -23,6 +23,7 @@ class SessionManager:
     ):
         self.sessions: Dict[str, SessionData] = {}
         self.websocket_tokens: Dict[str, str] = {}  # token -> session_id
+        self.csrf_tokens: Dict[str, tuple[str, datetime]] = {}  # token -> (session_id, expiry)
         self.cookie_name = cookie_name
         self.cookie_max_age = cookie_max_age
         self.refresh_threshold = refresh_threshold
@@ -96,6 +97,29 @@ class SessionManager:
         if response:
             self.refresh_session(session_id, response)
         return session
+    
+    def create_csrf_token(self) -> str:
+        """Create a new CSRF token for form submission."""
+        token = secrets.token_urlsafe(32)
+        expiry = datetime.now() + timedelta(minutes=30)  # 30 minute expiry
+        # Store without session binding for anonymous users
+        self.csrf_tokens[token] = ("", expiry)
+        return token
+    
+    def validate_csrf_token(self, token: str) -> bool:
+        """Validate a CSRF token."""
+        if token not in self.csrf_tokens:
+            return False
+            
+        _, expiry = self.csrf_tokens[token]
+        if datetime.now() > expiry:
+            # Clean up expired token
+            self.csrf_tokens.pop(token, None)
+            return False
+            
+        # Token is valid - remove it (one-time use)
+        self.csrf_tokens.pop(token)
+        return True
 
     def cleanup_expired_sessions(self) -> None:
         """Remove expired sessions and their associated tokens"""
@@ -110,6 +134,15 @@ class SessionManager:
             session = self.sessions.pop(sid)
             if session.websocket_token:
                 self.websocket_tokens.pop(session.websocket_token, None)
+        
+        # Clean up expired CSRF tokens
+        expired_csrf = [
+            token
+            for token, (_, expiry) in self.csrf_tokens.items()
+            if current_time > expiry
+        ]
+        for token in expired_csrf:
+            self.csrf_tokens.pop(token, None)
 
     def validate_totp_use(self, session_id: str, totp_code: str) -> bool:
         session = self.get_session(session_id)
@@ -130,3 +163,16 @@ class SessionManager:
         session.last_totp_use = totp_code
         session.connection_state = ConnectionState.INITIALIZING
         return True
+    
+    def revoke_session(self, session_id: str) -> None:
+        """Immediately revoke a session and all associated tokens."""
+        session = self.sessions.pop(session_id, None)
+        if session:
+            # Remove websocket token
+            if session.websocket_token:
+                self.websocket_tokens.pop(session.websocket_token, None)
+            
+            # Find and remove any active WebSocket connections
+            # This will be handled by the WebSocket manager when it detects
+            # the missing session
+            logger.info(f"Session {session_id} revoked")

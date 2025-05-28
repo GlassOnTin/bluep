@@ -57,8 +57,8 @@ class TOTPAuth:
         logger.debug(f"Current TOTP: {current_totp}")
         logger.debug(f"Time remaining: {30 - int(time.time()) % 30}s")
 
-        # Increase valid_window to handle time drift
-        valid = self.totp.verify(key, valid_window=2)
+        # Reduced window for improved security (±1 = 3 possible codes)
+        valid = self.totp.verify(key, valid_window=1)
         logger.debug(f"TOTP verification result: {valid}")
 
         if not valid:

@@ -1,14 +1,19 @@
 import pytest
+import tempfile
+from pathlib import Path
 from fastapi import Response
 from fastapi.testclient import TestClient
 from bluep.bluep import BlueApp
 from bluep.auth import TOTPAuth
+from bluep.secure_config import SecureConfig
 
 
 @pytest.fixture
 def app():
     """Create a test instance of the BlueApp application."""
     blue_app = BlueApp()
+    # Reset setup state for each test
+    blue_app.auth.config.set_setup_complete(False)
     return blue_app.app
 
 

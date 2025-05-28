@@ -8,6 +8,7 @@ import json
 import time
 import secrets
 import hashlib
+import html
 from io import BytesIO
 from typing import Optional
 
@@ -91,6 +92,7 @@ class BlueApp:
         self.app.post("/key-exchange")(self.key_exchange)
         self.app.post("/tampering-report")(self.tampering_report)
         self.app.post("/csp-report")(self.csp_report)
+        self.app.post("/logout")(self.logout)
 
     async def setup(self, request: Request) -> Response:
         """Serve the TOTP setup page. Disabled after initial setup for security."""
@@ -112,8 +114,8 @@ class BlueApp:
             {
                 "request": request,
                 "qr_code": qr_base64,
-                "secret_key": self.auth.secret_key,
-                "current_token": self.auth.totp.now(),
+                "secret_key": html.escape(self.auth.secret_key or ""),
+                "current_token": html.escape(self.auth.totp.now() or ""),
             },
         )
 
@@ -147,8 +149,12 @@ class BlueApp:
             return Response(content=img_bytes.getvalue(), media_type="image/png")
 
     async def login(self, request: Request) -> Response:
-        """Serve the login page."""
-        return templates.TemplateResponse("login.html", {"request": request})
+        """Serve the login page with CSRF protection."""
+        csrf_token = self.session_manager.create_csrf_token()
+        return templates.TemplateResponse("login.html", {
+            "request": request,
+            "csrf_token": csrf_token
+        })
     
     async def terminal(self, request: Request) -> Response:
         """Serve the terminal page."""
@@ -165,8 +171,8 @@ class BlueApp:
             "terminal.html",
             {
                 "request": request,
-                "token": session.websocket_token,
-                "shared_key": self.session_manager.shared_encryption_key,
+                "token": html.escape(session.websocket_token or ""),
+                "shared_key": html.escape(self.session_manager.shared_encryption_key or ""),
             }
         )
 
@@ -192,12 +198,12 @@ class BlueApp:
             "editor.html",
             {
                 "request": request,
-                "host_ip": settings.host_ip,
-                "token": session.websocket_token,
-                "blue": settings.blue_color,
-                "cert_fingerprint": self.cert_fingerprint,
-                "script_length": script_length,
-                "shared_key": self.session_manager.shared_encryption_key,
+                "host_ip": html.escape(str(settings.host_ip)),
+                "token": html.escape(session.websocket_token or ""),
+                "blue": html.escape(settings.blue_color),
+                "cert_fingerprint": html.escape(self.cert_fingerprint or ""),
+                "script_length": int(script_length),  # Already safe as int
+                "shared_key": html.escape(self.session_manager.shared_encryption_key or ""),
             },
         )
 
@@ -207,8 +213,15 @@ class BlueApp:
         return response
 
     async def post(self, request: Request, response: Response) -> Response:
-        """Handle POST request for secure TOTP submission"""
+        """Handle POST request for secure TOTP submission with CSRF protection"""
         form_data = await request.form()
+        
+        # Validate CSRF token
+        csrf_token = form_data.get("csrf_token")
+        if not csrf_token or not self.session_manager.validate_csrf_token(str(csrf_token)):
+            logger.warning("Invalid or missing CSRF token in login attempt")
+            return RedirectResponse(url="/login", status_code=303)
+        
         key_input = form_data.get("key")
         key = str(key_input) if key_input else ""
 
@@ -236,12 +249,12 @@ class BlueApp:
                 "editor.html",
                 {
                     "request": request,
-                    "host_ip": settings.host_ip,
-                    "token": latest_session.websocket_token,
-                    "blue": settings.blue_color,
-                    "cert_fingerprint": self.cert_fingerprint,
-                    "script_length": script_length,
-                    "shared_key": self.session_manager.shared_encryption_key,
+                    "host_ip": html.escape(str(settings.host_ip)),
+                    "token": html.escape(latest_session.websocket_token or ""),
+                    "blue": html.escape(settings.blue_color),
+                    "cert_fingerprint": html.escape(self.cert_fingerprint or ""),
+                    "script_length": int(script_length),  # Already safe as int
+                    "shared_key": html.escape(self.session_manager.shared_encryption_key or ""),
                 },
             )
 
@@ -264,6 +277,38 @@ class BlueApp:
 
     async def websocket_endpoint(self, websocket: WebSocket) -> None:
         try:
+            # CRITICAL: Validate WebSocket origin to prevent cross-origin hijacking
+            origin = websocket.headers.get("origin")
+            if origin:
+                # Parse the origin to validate it
+                from urllib.parse import urlparse
+                parsed_origin = urlparse(origin)
+                
+                # Only allow connections from the same host
+                expected_origins = [
+                    f"https://{settings.host_ip}:{settings.port}",
+                    f"https://localhost:{settings.port}",
+                    f"https://127.0.0.1:{settings.port}"
+                ]
+                
+                # Also allow the hostname if different from IP
+                import socket
+                try:
+                    hostname = socket.gethostname()
+                    expected_origins.append(f"https://{hostname}:{settings.port}")
+                except Exception:
+                    pass
+                
+                if origin not in expected_origins:
+                    logger.warning(f"WebSocket connection rejected - invalid origin: {origin}")
+                    await websocket.close(code=4002)
+                    return
+            else:
+                # Reject connections without origin header (could be non-browser client)
+                logger.warning("WebSocket connection rejected - missing origin header")
+                await websocket.close(code=4002)
+                return
+            
             # Get session ID from secure cookie
             cookies = websocket.cookies
             session_id = cookies.get(self.session_manager.cookie_name)
@@ -292,11 +337,26 @@ class BlueApp:
                 if not raw_msg:
                     continue
 
-                if raw_msg == '{"type": "pong"}':
-                    await self.ws_manager.handle_pong(websocket)
-                    continue
+                # Check for pong message
+                try:
+                    simple_msg = json.loads(raw_msg)
+                    if simple_msg.get("type") == "pong":
+                        logger.debug("Received pong message")
+                        await self.ws_manager.handle_pong(websocket)
+                        continue
+                except json.JSONDecodeError:
+                    pass  # Not a valid JSON, continue to main parsing
 
-                msg = WebSocketMessage.model_validate_json(raw_msg)
+                try:
+                    msg = WebSocketMessage.model_validate_json(raw_msg)
+                except Exception as parse_error:
+                    logger.error(f"Failed to parse WebSocket message: {raw_msg[:200]}, error: {parse_error}")
+                    await websocket.send_json({
+                        "type": "error",
+                        "error": "Invalid message format"
+                    })
+                    continue
+                    
                 if msg.type == "content" and msg.data is not None:
                     # Store the text content
                     await self.ws_manager.update_shared_text(msg.data)
@@ -360,12 +420,21 @@ class BlueApp:
                     await self.ws_manager.handle_process_list(websocket)
 
         except WebSocketDisconnect:
+            logger.info("WebSocket disconnected normally")
             if websocket in self.ws_manager.active_connections:
-                await self.ws_manager.disconnect(websocket)
+                await self.ws_manager.disconnect(websocket, reason="client_disconnect")
         except Exception as e:
-            logger.error(f"WebSocket error: {e}")
-            if websocket in self.ws_manager.active_connections:
-                await self.ws_manager.disconnect(websocket)
+            logger.error(f"WebSocket error: {e}", exc_info=True)
+            # Don't disconnect on error - let the client retry
+            try:
+                await websocket.send_json({
+                    "type": "error",
+                    "error": f"Server error: {str(e)}"
+                })
+            except:
+                # If we can't send error, then disconnect
+                if websocket in self.ws_manager.active_connections:
+                    await self.ws_manager.disconnect(websocket, reason="error")
 
     async def verify_certificate(self, request: Request) -> Response:
         """Verify certificate hasn't been replaced by a proxy"""
@@ -499,6 +568,22 @@ class BlueApp:
             logger.error(f"Error handling CSP report: {e}")
             return Response(status_code=500)
 
+    async def logout(self, request: Request) -> Response:
+        """Handle session logout/revocation."""
+        # Get session from cookie
+        session_cookie = request.cookies.get(self.session_manager.cookie_name)
+        if session_cookie:
+            session = self.session_manager.get_session(session_cookie)
+            if session:
+                # Revoke the session
+                self.session_manager.revoke_session(session_cookie)
+                logger.info(f"Session revoked for user {session.username}")
+        
+        # Redirect to login page and clear cookie
+        response = RedirectResponse(url="/login", status_code=303)
+        response.delete_cookie(self.session_manager.cookie_name, path="/")
+        return response
+    
     async def favicon(self, request: Request, key: Optional[str] = None) -> Response:
         """Serve the favicon, requiring auth via session cookie or key parameter. Returns 403 if not authenticated."""
         # Check for valid session cookie

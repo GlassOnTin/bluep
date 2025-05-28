@@ -8,7 +8,7 @@ from datetime import datetime
 from enum import Enum
 from typing import Any, Dict, List, Literal, Optional, Union
 
-from pydantic import BaseModel, field_validator, ValidationInfo
+from pydantic import BaseModel, Field, validator, field_validator, ValidationInfo
 
 
 class ConnectionState(Enum):
@@ -73,10 +73,30 @@ class WebSocketMessage(BaseModel):
     fileType: Optional[str] = None  # MIME type
     fileChunk: Optional[int] = None  # Chunk number for file transfers
     totalChunks: Optional[int] = None  # Total chunks for file transfers
-    processId: Optional[str] = None  # Process identifier
-    command: Optional[str] = None  # Command to spawn
-    cols: Optional[int] = None  # Terminal columns for resize
-    rows: Optional[int] = None  # Terminal rows for resize
+    processId: Optional[str] = Field(None, max_length=100)  # Process identifier
+    command: Optional[str] = Field(None, max_length=1000)  # Command to spawn
+    cols: Optional[int] = Field(None, ge=1, le=500)  # Terminal columns for resize
+    rows: Optional[int] = Field(None, ge=1, le=200)  # Terminal rows for resize
+    
+    @validator('processId')
+    def validate_process_id(cls, v):
+        if v and not v.replace('-', '').replace('_', '').isalnum():
+            raise ValueError('Invalid process ID format')
+        return v
+    
+    @validator('data')
+    def validate_data_size(cls, v, values):
+        if v and values.get('type') == 'process-input' and len(v) > 10000:
+            raise ValueError('Process input too large')
+        elif v and values.get('type') == 'content' and len(v) > 1000000:  # 1MB limit for content
+            raise ValueError('Content too large')
+        return v
+    
+    @validator('fileSize')
+    def validate_file_size(cls, v):
+        if v and v > 100 * 1024 * 1024:  # 100MB limit
+            raise ValueError('File size too large')
+        return v
     outputData: Optional[str] = None  # Base64 encoded process output
     processes: Optional[List[Dict[str, Any]]] = None  # List of processes
 

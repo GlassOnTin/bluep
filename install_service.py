@@ -47,6 +47,10 @@ def create_service_file(
     Returns:
         str: Service unit file content
     """
+    # Get user's home directory
+    import pwd
+    user_home = pwd.getpwnam(user).pw_dir
+    
     return f"""[Unit]
 Description=Bluep Collaborative Text Editor
 After=network.target
@@ -56,8 +60,8 @@ Type=simple
 User={user}
 Group={group}
 WorkingDirectory={bluep_path}
-Environment=PATH={os.environ.get('PATH', '/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin')}
-ExecStart={python_path} -m bluep.bluep
+# Use bash login shell to source user environment
+ExecStart=/bin/bash -l -c '{python_path} -m bluep.bluep'
 Restart=always
 RestartSec=3
 
@@ -66,12 +70,16 @@ NoNewPrivileges=yes
 PrivateTmp=yes
 ProtectSystem=full
 ProtectHome=read-only
+ReadWritePaths={user_home}/.bluep
+# Allow PTY allocation for terminal feature
+PrivateDevices=no
 CapabilityBoundingSet=
 AmbientCapabilities=
 ProtectKernelTunables=yes
 ProtectKernelModules=yes
 ProtectControlGroups=yes
-PrivateDevices=yes
+# Ensure sufficient process limits
+TasksMax=100
 
 [Install]
 WantedBy=multi-user.target
