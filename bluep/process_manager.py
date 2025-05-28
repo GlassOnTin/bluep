@@ -8,6 +8,7 @@ import os
 import pty
 import queue
 import resource
+import select
 import shlex
 import shutil
 import signal
@@ -560,7 +561,14 @@ class ProcessManager:
         
         while True:
             try:
-                # Block until data is available
+                # Wait for data to be available using select
+                readable, _, _ = select.select([master_fd], [], [], 0.1)
+                
+                if not readable:
+                    # No data available yet, continue waiting
+                    continue
+                    
+                # Now read the available data
                 data = os.read(master_fd, 4096)
                 if not data:
                     logger.info(f"Node.js reader thread: EOF for process {process_id}")
@@ -580,6 +588,9 @@ class ProcessManager:
             except OSError as e:
                 if e.errno == errno.EBADF:
                     logger.info(f"Node.js reader thread: FD closed for process {process_id}")
+                elif e.errno == errno.EAGAIN or e.errno == errno.EWOULDBLOCK:
+                    # Non-blocking read would block, continue
+                    continue
                 else:
                     logger.error(f"Node.js reader thread error for process {process_id}: {e}")
                 break

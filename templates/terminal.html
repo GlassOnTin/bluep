@@ -142,9 +142,20 @@
             margin-top: 20px;
         }
         
-        #welcome-screen .command-btn {
+        #welcome-screen .welcome-spawn-btn {
             padding: 20px;
             font-size: 16px;
+            background: #2a2a4e;
+            color: #fff;
+            border: none;
+            border-radius: 5px;
+            cursor: pointer;
+            transition: all 0.2s;
+        }
+        
+        #welcome-screen .welcome-spawn-btn:hover {
+            background: #3a3a5e;
+            transform: translateY(-1px);
         }
         
         .command-btn {
@@ -209,10 +220,10 @@
                 <h2>Welcome to Bluep Terminal</h2>
                 <p>Choose a terminal type to get started:</p>
                 <div class="command-grid">
-                    <button class="command-btn welcome-spawn-btn" data-command="bash">🖥️ Bash</button>
-                    <button class="command-btn welcome-spawn-btn" data-command="python">🐍 Python</button>
-                    <button class="command-btn welcome-spawn-btn" data-command="node">📦 Node.js</button>
-                    <button class="command-btn welcome-spawn-btn" data-command="claude">🤖 Claude</button>
+                    <button class="welcome-spawn-btn" data-command="bash">🖥️ Bash</button>
+                    <button class="welcome-spawn-btn" data-command="python">🐍 Python</button>
+                    <button class="welcome-spawn-btn" data-command="node">📦 Node.js</button>
+                    <button class="welcome-spawn-btn" data-command="claude">🤖 Claude</button>
                 </div>
             </div>
         </div>
@@ -467,8 +478,8 @@
             }
         }, 10000);
         
-        // Command selector
-        document.querySelectorAll('.command-btn').forEach(btn => {
+        // Command selector (exclude welcome screen buttons)
+        document.querySelectorAll('.command-btn:not(.welcome-spawn-btn)').forEach(btn => {
             btn.addEventListener('click', () => {
                 const command = btn.dataset.command;
                 spawnTerminal(command);
