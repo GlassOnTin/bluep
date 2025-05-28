@@ -31,6 +31,7 @@ from .models import (
 )
 from .middleware import configure_security
 from .websocket_manager import WebSocketManager
+from .process_manager import ProcessManager
 
 # Configure debug logging
 logging.basicConfig(level=logging.DEBUG)
@@ -93,6 +94,8 @@ class BlueApp:
         self.app.post("/tampering-report")(self.tampering_report)
         self.app.post("/csp-report")(self.csp_report)
         self.app.post("/logout")(self.logout)
+        self.app.get("/health")(self.health_check)
+        self.app.get("/health/detailed")(self.detailed_health_check)
 
     async def setup(self, request: Request) -> Response:
         """Serve the TOTP setup page. Disabled after initial setup for security."""
@@ -601,6 +604,73 @@ class BlueApp:
         img.save(buffer, format="PNG")
         return Response(content=buffer.getvalue(), media_type="image/png")
 
+    async def health_check(self) -> Response:
+        """Basic health check endpoint."""
+        return Response(
+            content=json.dumps({
+                "status": "healthy",
+                "timestamp": time.time(),
+                "service": "bluep"
+            }),
+            media_type="application/json"
+        )
+    
+    async def detailed_health_check(self, request: Request) -> Response:
+        """Detailed health check with subsystem status."""
+        # Check authentication - requires valid session
+        session_token = request.cookies.get("session_token")
+        if not session_token or not self.session_manager.validate_session_token(session_token):
+            raise HTTPException(status_code=401, detail="Authentication required")
+        
+        health_data = {
+            "status": "healthy",
+            "timestamp": time.time(),
+            "service": "bluep",
+            "subsystems": {
+                "websocket": {
+                    "status": "healthy",
+                    "active_connections": len(self.ws_manager.active_connections),
+                    "active_processes": len(self.ws_manager.process_manager.processes),
+                    "sessions": len(self.ws_manager.process_manager.session_processes)
+                },
+                "auth": {
+                    "status": "healthy",
+                    "totp_configured": bool(self.auth.secret_key),
+                    "setup_complete": self.auth.config.get_setup_complete(),
+                    "active_sessions": len(self.session_manager.sessions)
+                },
+                "terminal": {
+                    "status": "healthy",
+                    "processes": []
+                }
+            }
+        }
+        
+        # Add process details
+        for process_id in self.ws_manager.process_manager.processes.keys():
+            process_info = self.ws_manager.process_manager.get_process_info(process_id)
+            if process_info:
+                health_data["subsystems"]["terminal"]["processes"].append({
+                    "process_id": process_id,
+                    "command": process_info["command"],
+                    "state": process_info.get("state", "unknown"),
+                    "lifetime_seconds": process_info.get("lifetime_seconds", 0),
+                    "can_accept_input": process_info.get("can_accept_input", False)
+                })
+        
+        # Check overall health
+        all_healthy = all(
+            subsystem.get("status") == "healthy" 
+            for subsystem in health_data["subsystems"].values()
+        )
+        
+        health_data["status"] = "healthy" if all_healthy else "degraded"
+        
+        return Response(
+            content=json.dumps(health_data, indent=2),
+            media_type="application/json"
+        )
+    
     async def shutdown(self, signal_type: signal.Signals) -> None:
         """Handle graceful shutdown of the application."""
         print(f"\nReceived {signal_type.name}, shutting down...")

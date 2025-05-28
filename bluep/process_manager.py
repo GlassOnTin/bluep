@@ -22,7 +22,13 @@ from dataclasses import dataclass
 from typing import Dict, Optional, Set, Any, List
 from uuid import uuid4
 
-logger = logging.getLogger(__name__)
+from .terminal_state import TerminalState, TerminalStateMachine
+from .structured_logging import (
+    get_structured_logger, LogContext, log_event, LogEvent,
+    set_trace_context
+)
+
+logger = get_structured_logger(__name__)
 
 
 @dataclass
@@ -41,6 +47,7 @@ class ProcessInfo:
     reader_thread: Optional[threading.Thread] = None
     output_queue: Optional[queue.Queue] = None
     is_nodejs: bool = False
+    state_machine: Optional[TerminalStateMachine] = None
 
 
 class ProcessManager:
@@ -51,6 +58,7 @@ class ProcessManager:
         self.session_processes: Dict[str, Set[str]] = {}  # session_id -> process_ids
         self._lock = asyncio.Lock()
         self.max_processes_per_session = 5
+        # self.resource_manager = ProcessResourceManager()
         self.allowed_commands = {
             "bash", "sh", "python", "python3", "node", "claude", 
             "ipython", "irb", "sqlite3", "psql", "mysql"
@@ -72,23 +80,31 @@ class ProcessManager:
         cwd: Optional[str] = None
     ) -> Optional[str]:
         """Spawn a new process with PTY support for proper terminal behavior."""
-        async with self._lock:
-            # Clean up any dead processes from session tracking first
-            session_procs = self.session_processes.get(session_id, set()).copy()
-            for pid in session_procs:
-                if pid not in self.processes or not self.processes[pid].is_alive:
-                    self.session_processes[session_id].discard(pid)
-                    logger.info(f"Cleaned up dead process {pid} from session {session_id}")
-            
-            # Check session process limit after cleanup
-            session_procs = self.session_processes.get(session_id, set())
-            if len(session_procs) >= self.max_processes_per_session:
-                logger.warning(f"Session {session_id} reached process limit: {len(session_procs)}/{self.max_processes_per_session}")
-                logger.warning(f"Active processes for session: {list(session_procs)}")
-                # Log which processes are alive vs dead
-                alive_count = sum(1 for pid in session_procs if pid in self.processes and self.processes[pid].is_alive)
-                logger.warning(f"Alive processes: {alive_count}, Total tracked: {len(session_procs)}")
-                return None
+        # Set trace context for this operation
+        with LogContext(session_id=session_id):
+            async with self._lock:
+                # Clean up any dead processes from session tracking first
+                session_procs = self.session_processes.get(session_id, set()).copy()
+                for pid in session_procs:
+                    if pid not in self.processes or not self.processes[pid].is_alive:
+                        self.session_processes[session_id].discard(pid)
+                        log_event(logger, LogEvent.PROCESS_TERMINATE_SUCCESS, 
+                                 f"Cleaned up dead process {pid}",
+                                 process_id=pid, cleanup_reason="dead_process")
+                
+                # Check session process limit after cleanup
+                session_procs = self.session_processes.get(session_id, set())
+                if len(session_procs) >= self.max_processes_per_session:
+                    log_event(logger, LogEvent.PERFORMANCE_RESOURCE_LIMIT,
+                             f"Session reached process limit",
+                             level=logging.WARNING,
+                             session_limit=self.max_processes_per_session,
+                             active_processes=len(session_procs),
+                             process_ids=list(session_procs))
+                    # Log which processes are alive vs dead
+                    alive_count = sum(1 for pid in session_procs if pid in self.processes and self.processes[pid].is_alive)
+                    logger.warning(f"Alive processes: {alive_count}, Total tracked: {len(session_procs)}")
+                    return None
                 
             # Validate command - CRITICAL: Prevent command injection
             try:
@@ -286,6 +302,10 @@ class ProcessManager:
                 # Check if this is a Node.js process
                 is_nodejs = base_command == 'node' or 'node' in cmd_parts
                 
+                # Create state machine with trace ID
+                trace_id = f"{session_id[:8]}-{process_id[:8]}"
+                state_machine = TerminalStateMachine(process_id, trace_id)
+                
                 # Create process info
                 info = ProcessInfo(
                     process_id=process_id,
@@ -294,8 +314,16 @@ class ProcessManager:
                     master_fd=master_fd,
                     created_at=time.time(),
                     session_id=session_id,
-                    is_nodejs=is_nodejs
+                    is_nodejs=is_nodejs,
+                    state_machine=state_machine
                 )
+                
+                # Transition to SPAWNING state
+                await state_machine.transition_to(TerminalState.SPAWNING, {
+                    "command": command,
+                    "session_id": session_id,
+                    "is_nodejs": is_nodejs
+                })
                 
                 # For Node.js, use a separate reader thread to isolate PTY handling
                 if is_nodejs:
@@ -315,12 +343,37 @@ class ProcessManager:
                     self.session_processes[session_id] = set()
                 self.session_processes[session_id].add(process_id)
                 
-                # Security audit log
-                logger.info(f"Process spawned - ID: {process_id}, Command: {command}, Session: {session_id}, Time: {time.time()}")
+                # Transition to ACTIVE state
+                await state_machine.transition_to(TerminalState.ACTIVE, {
+                    "pid": process.pid,
+                    "master_fd": master_fd
+                })
+                
+                # Log successful spawn event
+                log_event(logger, LogEvent.PROCESS_SPAWN_SUCCESS,
+                         "Process spawned successfully",
+                         process_id=process_id,
+                         command=command,
+                         is_nodejs=is_nodejs,
+                         pid=process.pid,
+                         trace_id=trace_id)
+                
                 return process_id
                 
             except Exception as e:
-                logger.error(f"Failed to spawn process: {e}")
+                log_event(logger, LogEvent.PROCESS_SPAWN_ERROR,
+                         f"Failed to spawn process",
+                         level=logging.ERROR,
+                         error=str(e),
+                         command=command,
+                         process_id=process_id if 'process_id' in locals() else None)
+                
+                # Transition to ERROR state if we have a state machine
+                if 'state_machine' in locals():
+                    await state_machine.transition_to(TerminalState.ERROR, {
+                        "error": str(e)
+                    })
+                
                 # Clean up file descriptors
                 if master_fd is not None:
                     try:
@@ -341,6 +394,12 @@ class ProcessManager:
             info = self.processes.get(process_id)
             if not info or not info.is_alive or info.master_fd is None:
                 return False
+            
+            # Check state machine - only write if in ACTIVE state
+            if info.state_machine and not info.state_machine.can_accept_input():
+                logger.warning(f"Process {process_id} in state {info.state_machine.get_state().name}, cannot accept input")
+                return False
+            
             master_fd = info.master_fd
                 
         # Do the actual write outside the lock to prevent blocking other processes
@@ -458,12 +517,25 @@ class ProcessManager:
             if not info:
                 return False
             
+            # Check if we can terminate
+            if info.state_machine and not info.state_machine.can_terminate():
+                logger.warning(f"Process {process_id} in state {info.state_machine.get_state().name}, cannot terminate")
+                return False
+            
+            # Transition to TERMINATING state
+            if info.state_machine:
+                await info.state_machine.transition_to(TerminalState.TERMINATING, {
+                    "force": force,
+                    "reason": "user_request"
+                })
+            
             # Mark as not alive immediately to stop read attempts
             info.is_alive = False
             process = info.process
             master_fd = info.master_fd
             session_id = info.session_id
             reader_thread = info.reader_thread
+            state_machine = info.state_machine
             
             # Clear the master_fd reference to prevent reads
             info.master_fd = None
@@ -510,12 +582,33 @@ class ProcessManager:
                     del self.processes[process_id]
                     logger.debug(f"Removed process {process_id} from processes dict")
                     
-            # Security audit log
-            logger.info(f"Process terminated - ID: {process_id}, Force: {force}, Session: {session_id}, Time: {time.time()}")
+            # Transition to TERMINATED state
+            if state_machine:
+                await state_machine.transition_to(TerminalState.TERMINATED, {
+                    "exit_code": process.returncode if process else None,
+                    "lifetime_seconds": state_machine.get_lifetime_seconds()
+                })
+            
+            # Log termination event
+            log_event(logger, LogEvent.PROCESS_TERMINATE_SUCCESS,
+                     "Process terminated successfully",
+                     process_id=process_id,
+                     force=force,
+                     exit_code=process.returncode if process else None,
+                     lifetime_seconds=state_machine.get_lifetime_seconds() if state_machine else None,
+                     trace_id=state_machine.trace_id if state_machine else None)
             return True
                 
         except Exception as e:
             logger.error(f"Failed to terminate process {process_id}: {e}", exc_info=True)
+            
+            # Transition to ERROR state if we have a state machine
+            if 'state_machine' in locals() and state_machine:
+                await state_machine.transition_to(TerminalState.ERROR, {
+                    "error": str(e),
+                    "during": "termination"
+                })
+            
             return False
                 
     async def cleanup_session_processes(self, session_id: str) -> None:
@@ -554,13 +647,22 @@ class ProcessManager:
         if not info:
             return None
             
-        return {
+        result = {
             "process_id": info.process_id,
             "command": info.command,
             "created_at": info.created_at,
             "is_alive": info.is_alive,
             "session_id": info.session_id
         }
+        
+        # Add state information if available
+        if info.state_machine:
+            result["state"] = info.state_machine.get_state().name
+            result["lifetime_seconds"] = info.state_machine.get_lifetime_seconds()
+            result["can_accept_input"] = info.state_machine.can_accept_input()
+            result["trace_id"] = info.state_machine.trace_id
+        
+        return result
         
     def get_session_processes(self, session_id: str) -> List[Dict[str, Any]]:
         """Get all processes for a session."""
