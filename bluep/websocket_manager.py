@@ -450,12 +450,22 @@ class WebSocketManager:
                 "status": "spawned",
                 "command": command
             })
+            logger.info(f"Successfully spawned process {process_id} for command: {command}")
         else:
+            # Get current process count for better error message
+            current_processes = self.process_manager.get_session_processes(session_id)
+            alive_count = sum(1 for p in current_processes if p.get("is_alive", False))
+            
+            error_msg = f"Failed to spawn process. You have {alive_count} active terminals."
+            if alive_count >= 5:
+                error_msg = f"Terminal limit reached: You have {alive_count} active terminals (max 5). Close some terminals before creating new ones."
+            
             # Send error response
             await websocket.send_json({
                 "type": "error",
-                "error": "Failed to spawn process"
+                "error": error_msg
             })
+            logger.warning(f"Failed to spawn process for session {session_id}: {error_msg}")
             
     async def handle_process_input(self, websocket: WebSocket, process_id: str, data: str) -> None:
         """Handle input to a process."""

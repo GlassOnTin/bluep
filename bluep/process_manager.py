@@ -73,10 +73,21 @@ class ProcessManager:
     ) -> Optional[str]:
         """Spawn a new process with PTY support for proper terminal behavior."""
         async with self._lock:
-            # Check session process limit
+            # Clean up any dead processes from session tracking first
+            session_procs = self.session_processes.get(session_id, set()).copy()
+            for pid in session_procs:
+                if pid not in self.processes or not self.processes[pid].is_alive:
+                    self.session_processes[session_id].discard(pid)
+                    logger.info(f"Cleaned up dead process {pid} from session {session_id}")
+            
+            # Check session process limit after cleanup
             session_procs = self.session_processes.get(session_id, set())
             if len(session_procs) >= self.max_processes_per_session:
-                logger.warning(f"Session {session_id} reached process limit")
+                logger.warning(f"Session {session_id} reached process limit: {len(session_procs)}/{self.max_processes_per_session}")
+                logger.warning(f"Active processes for session: {list(session_procs)}")
+                # Log which processes are alive vs dead
+                alive_count = sum(1 for pid in session_procs if pid in self.processes and self.processes[pid].is_alive)
+                logger.warning(f"Alive processes: {alive_count}, Total tracked: {len(session_procs)}")
                 return None
                 
             # Validate command - CRITICAL: Prevent command injection
@@ -488,10 +499,16 @@ class ProcessManager:
                 if reader_thread.is_alive():
                     logger.warning(f"Reader thread did not exit cleanly for process {process_id}")
                     
-            # Remove from session tracking
+            # Remove from tracking
             async with self._lock:
+                # Remove from session tracking
                 if session_id and session_id in self.session_processes:
                     self.session_processes[session_id].discard(process_id)
+                    
+                # Remove from processes dict
+                if process_id in self.processes:
+                    del self.processes[process_id]
+                    logger.debug(f"Removed process {process_id} from processes dict")
                     
             # Security audit log
             logger.info(f"Process terminated - ID: {process_id}, Force: {force}, Session: {session_id}, Time: {time.time()}")
@@ -525,8 +542,8 @@ class ProcessManager:
                             
                     # Clean up dead processes
                     for process_id in dead_processes:
+                        # Terminate will handle session cleanup and removal from self.processes
                         await self.terminate_process(process_id)
-                        del self.processes[process_id]
                         
             except Exception as e:
                 logger.error(f"Error in process monitor: {e}")

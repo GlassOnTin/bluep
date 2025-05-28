@@ -490,15 +490,40 @@
             });
         });
         
-        // Welcome screen spawn buttons
-        document.querySelectorAll('.welcome-spawn-btn').forEach(btn => {
-            btn.addEventListener('click', () => {
-                const command = btn.dataset.command;
-                spawnTerminal(command);
-                // Hide welcome screen
-                document.getElementById('welcome-screen').style.display = 'none';
+        // Function to attach welcome button listeners
+        function attachWelcomeButtonListeners() {
+            document.querySelectorAll('.welcome-spawn-btn').forEach(btn => {
+                // Remove any existing listeners first
+                btn.replaceWith(btn.cloneNode(true));
             });
-        });
+            
+            // Re-query after replacing to get fresh references
+            document.querySelectorAll('.welcome-spawn-btn').forEach(btn => {
+                btn.addEventListener('click', (e) => {
+                    e.preventDefault();
+                    e.stopPropagation();
+                    const command = btn.dataset.command;
+                    console.log(`Welcome button clicked: ${command}`);
+                    
+                    // Check WebSocket state
+                    if (!isConnected || !ws || ws.readyState !== WebSocket.OPEN) {
+                        console.error('WebSocket not connected, current state:', ws ? ws.readyState : 'null');
+                        showError('Not connected to server');
+                        return;
+                    }
+                    
+                    // Hide welcome screen immediately
+                    document.getElementById('welcome-screen').style.display = 'none';
+                    
+                    // Spawn terminal
+                    console.log(`Spawning terminal: ${command}`);
+                    spawnTerminal(command);
+                });
+            });
+        }
+        
+        // Initial attachment of welcome button listeners
+        attachWelcomeButtonListeners();
         
         // New terminal button
         document.getElementById('new-terminal-btn').addEventListener('click', () => {
@@ -513,15 +538,19 @@
         // Spawn a new terminal
         function spawnTerminal(command) {
             if (!isConnected || !ws || ws.readyState !== WebSocket.OPEN) {
+                console.error('Cannot spawn terminal - WebSocket state:', ws ? ws.readyState : 'null');
                 showError("Not connected to server");
                 return;
             }
             
+            console.log(`Sending spawn request for: ${command}`);
             try {
-                ws.send(JSON.stringify({
+                const message = JSON.stringify({
                     type: "process-spawn",
                     command: command
-                }));
+                });
+                ws.send(message);
+                console.log('Spawn request sent successfully');
             } catch (e) {
                 console.error('Error spawning terminal:', e);
                 showError('Failed to spawn terminal');
@@ -1089,7 +1118,11 @@
         function showWelcomeScreen() {
             const hasActiveTerminals = Object.values(terminals).some(t => t && t.active);
             if (!hasActiveTerminals) {
+                console.log('Showing welcome screen - no active terminals');
                 document.getElementById('welcome-screen').style.display = 'block';
+                
+                // Re-attach event listeners in case they were lost
+                attachWelcomeButtonListeners();
             }
         }
         
