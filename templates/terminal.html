@@ -117,6 +117,36 @@
             flex-wrap: wrap;
         }
         
+        #welcome-screen {
+            position: absolute;
+            top: 50%;
+            left: 50%;
+            transform: translate(-50%, -50%);
+            text-align: center;
+            color: #fff;
+            padding: 40px;
+            background: rgba(42, 42, 78, 0.8);
+            border-radius: 10px;
+            display: none;
+        }
+        
+        #welcome-screen h2 {
+            margin-bottom: 20px;
+            color: #4fc3f7;
+        }
+        
+        #welcome-screen .command-grid {
+            display: grid;
+            grid-template-columns: repeat(2, 1fr);
+            gap: 15px;
+            margin-top: 20px;
+        }
+        
+        #welcome-screen .command-btn {
+            padding: 20px;
+            font-size: 16px;
+        }
+        
         .command-btn {
             padding: 8px 16px;
             background: #2a2a4e;
@@ -174,7 +204,18 @@
             <div id="terminal-tabs"></div>
             <button id="new-terminal-btn">+ New Terminal</button>
         </div>
-        <div id="terminal-output"></div>
+        <div id="terminal-output">
+            <div id="welcome-screen">
+                <h2>Welcome to Bluep Terminal</h2>
+                <p>Choose a terminal type to get started:</p>
+                <div class="command-grid">
+                    <button class="command-btn welcome-spawn-btn" data-command="bash">🖥️ Bash</button>
+                    <button class="command-btn welcome-spawn-btn" data-command="python">🐍 Python</button>
+                    <button class="command-btn welcome-spawn-btn" data-command="node">📦 Node.js</button>
+                    <button class="command-btn welcome-spawn-btn" data-command="claude">🤖 Claude</button>
+                </div>
+            </div>
+        </div>
     </div>
     
     <script>
@@ -438,6 +479,16 @@
             });
         });
         
+        // Welcome screen spawn buttons
+        document.querySelectorAll('.welcome-spawn-btn').forEach(btn => {
+            btn.addEventListener('click', () => {
+                const command = btn.dataset.command;
+                spawnTerminal(command);
+                // Hide welcome screen
+                document.getElementById('welcome-screen').style.display = 'none';
+            });
+        });
+        
         // New terminal button
         document.getElementById('new-terminal-btn').addEventListener('click', () => {
             const activeBtn = document.querySelector('.command-btn.active');
@@ -494,6 +545,9 @@
                     terminating: false,  // Track if terminal is being terminated
                     readyForCleanup: false  // Track if terminal is ready to be cleaned up
                 };
+                
+                // Hide welcome screen when terminal is created
+                hideWelcomeScreen();
                 
                 // Handle terminal input - use a closure-safe function
                 // Store the disposable so we can clean it up later
@@ -575,6 +629,8 @@
                                 switchingTerminal = false;
                                 // No other terminals, safe to cleanup immediately
                                 cleanupTerminal(processId);
+                                // Show welcome screen when no terminals left
+                                showWelcomeScreen();
                             }
                         } else {
                             // Not active terminal, safe to cleanup
@@ -620,7 +676,11 @@
         async function handleProcessList(msg) {
             const { processes } = msg;
             
-            if (!processes || processes.length === 0) return;
+            if (!processes || processes.length === 0) {
+                // No existing processes, show welcome screen
+                showWelcomeScreen();
+                return;
+            }
             
             console.log(`Received process list with ${processes.length} processes`);
             
@@ -1012,6 +1072,19 @@
             setTimeout(() => {
                 document.body.removeChild(errorDiv);
             }, 5000);
+        }
+        
+        // Show welcome screen when no terminals
+        function showWelcomeScreen() {
+            const hasActiveTerminals = Object.values(terminals).some(t => t && t.active);
+            if (!hasActiveTerminals) {
+                document.getElementById('welcome-screen').style.display = 'block';
+            }
+        }
+        
+        // Hide welcome screen when terminal is created
+        function hideWelcomeScreen() {
+            document.getElementById('welcome-screen').style.display = 'none';
         }
         
         // Clean up on page unload
