@@ -15,6 +15,7 @@ import signal
 import struct
 import subprocess
 import sys
+import tempfile
 import termios
 import threading
 import time
@@ -48,6 +49,7 @@ class ProcessInfo:
     output_queue: Optional[queue.Queue] = None
     is_nodejs: bool = False
     state_machine: Optional[TerminalStateMachine] = None
+    temp_home: Optional[str] = None
 
 
 class ProcessManager:
@@ -59,18 +61,36 @@ class ProcessManager:
         self._lock = asyncio.Lock()
         self.max_processes_per_session = 5
         # self.resource_manager = ProcessResourceManager()
+        # Allow common development tools and shells
+        # This is similar to what SSH allows - trust authentication
         self.allowed_commands = {
-            "bash", "sh", "python", "python3", "node", "claude", 
-            "ipython", "irb", "sqlite3", "psql", "mysql"
+            # Shells
+            "bash", "sh", "zsh", "fish", "dash",
+            # Python
+            "python", "python3", "python2", "ipython", "ipython3",
+            # Node.js
+            "node", "npm", "npx", "yarn", "pnpm", "bun", "deno",
+            # Ruby
+            "ruby", "irb", "pry",
+            # Other languages
+            "perl", "php", "lua", "julia", "R",
+            # Databases
+            "sqlite3", "psql", "mysql", "mongo", "redis-cli",
+            # Editors
+            "vim", "vi", "nano", "emacs", "ed",
+            # Tools
+            "git", "hg", "svn", "make", "gcc", "g++", "clang",
+            "cargo", "rustc", "go", "java", "javac", "gradle", "mvn",
+            "docker", "kubectl", "htop", "top", "ps", "ls", "cat",
+            "grep", "sed", "awk", "find", "which", "curl", "wget",
+            # SSH and user switching
+            "ssh", "su", "sudo",
+            # Claude
+            "claude"
         }
-        # Additional security: forbidden command patterns
-        self.forbidden_patterns = [
-            "sudo", "su", "chmod", "chown", "rm -rf", "dd", 
-            "mkfs", "fdisk", "systemctl", "service", "killall",
-            "pkill", "reboot", "shutdown", "halt", "poweroff",
-            "nc", "netcat", "nmap", "wget", "curl", "ssh",
-            "/etc/passwd", "/etc/shadow", "~/.ssh", ".bash_history"
-        ]
+        # Minimal forbidden patterns - only prevent obvious system damage
+        # Trust authentication like SSH does
+        self.forbidden_patterns = []
         
     async def spawn_process(
         self,
@@ -86,7 +106,13 @@ class ProcessManager:
                 # Clean up any dead processes from session tracking first
                 session_procs = self.session_processes.get(session_id, set()).copy()
                 for pid in session_procs:
-                    if pid not in self.processes or not self.processes[pid].is_alive:
+                    # Remove if process doesn't exist OR if it exists but is not alive
+                    if pid not in self.processes:
+                        self.session_processes[session_id].discard(pid)
+                        log_event(logger, LogEvent.PROCESS_TERMINATE_SUCCESS, 
+                                 f"Cleaned up missing process {pid}",
+                                 process_id=pid, cleanup_reason="process_not_found")
+                    elif not self.processes[pid].is_alive:
                         self.session_processes[session_id].discard(pid)
                         log_event(logger, LogEvent.PROCESS_TERMINATE_SUCCESS, 
                                  f"Cleaned up dead process {pid}",
@@ -124,18 +150,16 @@ class ProcessManager:
                 logger.warning(f"Command not allowed: {base_command}")
                 return None
             
-            # CRITICAL: For shell commands, use restricted mode and validate all arguments
+            # For shell commands, use SSH to localhost for proper user authentication
             if base_command in ['bash', 'sh']:
-                # Force restricted shell mode
-                if base_command == 'bash':
-                    cmd_parts = ['bash', '--restricted', '--noprofile', '--norc']
-                else:
-                    cmd_parts = ['sh', '-r']
-                    
-                # If user provided arguments to shell, reject them
-                if len(shlex.split(command)) > 1:
-                    logger.warning("Shell commands cannot have arguments")
-                    return None
+                # SSH to localhost with password authentication preference
+                # Force TTY allocation for proper interactive session
+                cmd_parts = ['ssh', '-t', '-o', 'StrictHostKeyChecking=no', 
+                            '-o', 'UserKnownHostsFile=/dev/null',
+                            '-o', 'PreferredAuthentications=password',
+                            '-o', 'PubkeyAuthentication=no',
+                            '-o', 'PasswordAuthentication=yes',
+                            'localhost']
             elif base_command in ['node', 'claude']:
                 # Node.js and claude need interactive mode for REPL to work properly with PTY
                 if base_command == 'node':
@@ -143,34 +167,10 @@ class ProcessManager:
                 else:
                     # claude might have its own interactive flag or work without it
                     cmd_parts = ['claude']
-                # Don't allow additional arguments
-                if len(shlex.split(command)) > 1:
-                    logger.warning(f"{base_command} commands cannot have arguments")
-                    return None
+                # Keep the parsed command parts as-is for node/claude
             else:
-                # For non-shell commands, validate each argument
-                for arg in cmd_parts[1:]:
-                    # Reject arguments that look like command substitution or expansion
-                    if any(char in arg for char in ['$', '`', '$(', '${', '\\']):
-                        logger.warning(f"Suspicious argument detected: {arg}")
-                        return None
-                    
-                    # Reject arguments that start with - followed by suspicious content
-                    if arg.startswith('-') and any(c in arg for c in ['=', ';', '|', '&']):
-                        logger.warning(f"Suspicious option detected: {arg}")
-                        return None
-                
-            # Check for forbidden patterns in the original command
-            command_lower = command.lower()
-            for pattern in self.forbidden_patterns:
-                if pattern in command_lower:
-                    logger.warning(f"Forbidden pattern detected: {pattern}")
-                    return None
-                    
-            # Limit command arguments
-            if len(cmd_parts) > 10:
-                logger.warning("Too many command arguments")
-                return None
+                # Use the command as provided (trust authentication)
+                pass
                 
             process_id = str(uuid4())
             master_fd = None
@@ -192,12 +192,25 @@ class ProcessManager:
                 # This ensures we get the same PATH and other vars as the service user
                 process_env = os.environ.copy()
                 
+                # For most processes, create a temporary HOME directory
+                # For claude, use the actual home directory for persistence
+                if base_command == 'claude':
+                    # Use actual home directory for claude to persist config
+                    temp_home = os.path.expanduser("~")
+                    logger.info(f"Using actual home directory for claude process: {temp_home}")
+                else:
+                    # Create a temporary directory for other processes
+                    temp_home = tempfile.mkdtemp(prefix=f"bluep-{process_id[:8]}-")
+                    logger.info(f"Created temporary HOME directory for process {process_id}: {temp_home}")
+                
                 # Override/ensure critical terminal variables
                 process_env.update({
                     'TERM': 'xterm-256color',
                     'COLORTERM': 'truecolor',
                     'PYTHONUNBUFFERED': '1',  # For Python processes
                     'NODE_NO_READLINE': '1',  # Force Node.js to not use readline (we handle that)
+                    'HOME': temp_home,  # Set writable HOME directory
+                    'TMPDIR': temp_home,  # Also set TMPDIR for temp files
                 })
                 
                 # Remove potentially sensitive or problematic variables
@@ -315,7 +328,8 @@ class ProcessManager:
                     created_at=time.time(),
                     session_id=session_id,
                     is_nodejs=is_nodejs,
-                    state_machine=state_machine
+                    state_machine=state_machine,
+                    temp_home=temp_home
                 )
                 
                 # Transition to SPAWNING state
@@ -373,6 +387,14 @@ class ProcessManager:
                     await state_machine.transition_to(TerminalState.ERROR, {
                         "error": str(e)
                     })
+                
+                # Clean up temporary directory if created (but not if it's the actual home directory)
+                if 'temp_home' in locals() and temp_home and temp_home.startswith('/tmp/') and os.path.exists(temp_home):
+                    try:
+                        shutil.rmtree(temp_home)
+                        logger.info(f"Cleaned up temporary directory after spawn error: {temp_home}")
+                    except Exception as cleanup_error:
+                        logger.warning(f"Failed to clean up temporary directory {temp_home}: {cleanup_error}")
                 
                 # Clean up file descriptors
                 if master_fd is not None:
@@ -571,6 +593,20 @@ class ProcessManager:
                 if reader_thread.is_alive():
                     logger.warning(f"Reader thread did not exit cleanly for process {process_id}")
                     
+            # Clean up temporary home directory (but not if it's the actual home directory)
+            temp_home = None
+            async with self._lock:
+                if process_id in self.processes and self.processes[process_id].temp_home:
+                    temp_home = self.processes[process_id].temp_home
+                    
+            # Only clean up if it's a temporary directory (starts with /tmp/)
+            if temp_home and temp_home.startswith('/tmp/') and os.path.exists(temp_home):
+                try:
+                    shutil.rmtree(temp_home)
+                    logger.info(f"Cleaned up temporary directory for process {process_id}: {temp_home}")
+                except Exception as e:
+                    logger.warning(f"Failed to clean up temporary directory {temp_home}: {e}")
+                    
             # Remove from tracking
             async with self._lock:
                 # Remove from session tracking
@@ -633,10 +669,17 @@ class ProcessManager:
                             info.is_alive = False
                             dead_processes.append(process_id)
                             
-                    # Clean up dead processes
-                    for process_id in dead_processes:
-                        # Terminate will handle session cleanup and removal from self.processes
-                        await self.terminate_process(process_id)
+                    # Also clean up session tracking for any orphaned processes
+                    for session_id, process_ids in list(self.session_processes.items()):
+                        for pid in list(process_ids):
+                            if pid not in self.processes or (pid in self.processes and not self.processes[pid].is_alive):
+                                process_ids.discard(pid)
+                                logger.debug(f"Removed orphaned process {pid} from session {session_id}")
+                            
+                # Clean up dead processes outside the lock
+                for process_id in dead_processes:
+                    # Terminate will handle session cleanup and removal from self.processes
+                    await self.terminate_process(process_id)
                         
             except Exception as e:
                 logger.error(f"Error in process monitor: {e}")

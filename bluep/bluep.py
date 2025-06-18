@@ -87,6 +87,7 @@ class BlueApp:
         self.app.get("/setup")(self.setup)
         self.app.get("/login")(self.login)
         self.app.get("/terminal")(self.terminal)
+        self.app.get("/mcp")(self.mcp)
         self.app.get("/favicon.png")(self.favicon)
         self.app.websocket("/ws")(self.websocket_endpoint)
         self.app.post("/verify-cert")(self.verify_certificate)
@@ -154,9 +155,11 @@ class BlueApp:
     async def login(self, request: Request) -> Response:
         """Serve the login page with CSRF protection."""
         csrf_token = self.session_manager.create_csrf_token()
+        redirect_url = request.query_params.get("redirect", "/")
         return templates.TemplateResponse("login.html", {
             "request": request,
-            "csrf_token": csrf_token
+            "csrf_token": csrf_token,
+            "redirect_url": redirect_url
         })
     
     async def terminal(self, request: Request) -> Response:
@@ -164,11 +167,11 @@ class BlueApp:
         # Check authentication
         cookie = request.cookies.get(self.session_manager.cookie_name)
         if not cookie:
-            return RedirectResponse(url="/login", status_code=303)
+            return RedirectResponse(url="/login?redirect=/terminal", status_code=303)
             
         session = self.session_manager.get_session(cookie)
         if not session:
-            return RedirectResponse(url="/login", status_code=303)
+            return RedirectResponse(url="/login?redirect=/terminal", status_code=303)
             
         return templates.TemplateResponse(
             "terminal.html",
@@ -176,6 +179,26 @@ class BlueApp:
                 "request": request,
                 "token": html.escape(session.websocket_token or ""),
                 "shared_key": html.escape(self.session_manager.shared_encryption_key or ""),
+            }
+        )
+
+    async def mcp(self, request: Request) -> Response:
+        """Serve the MCP services management page."""
+        # Check authentication
+        cookie = request.cookies.get(self.session_manager.cookie_name)
+        if not cookie:
+            return RedirectResponse(url="/login?redirect=/mcp", status_code=303)
+            
+        session = self.session_manager.get_session(cookie)
+        if not session:
+            return RedirectResponse(url="/login?redirect=/mcp", status_code=303)
+            
+        return templates.TemplateResponse(
+            "mcp.html",
+            {
+                "request": request,
+                "token": html.escape(session.websocket_token or ""),
+                "session_cookie": html.escape(cookie),
             }
         )
 
@@ -219,55 +242,44 @@ class BlueApp:
         """Handle POST request for secure TOTP submission with CSRF protection"""
         form_data = await request.form()
         
+        # Get redirect URL from form data
+        redirect_url = form_data.get("redirect_url", "/")
+        
         # Validate CSRF token
         csrf_token = form_data.get("csrf_token")
         if not csrf_token or not self.session_manager.validate_csrf_token(str(csrf_token)):
             logger.warning("Invalid or missing CSRF token in login attempt")
-            return RedirectResponse(url="/login", status_code=303)
+            return RedirectResponse(url=f"/login?redirect={redirect_url}", status_code=303)
         
         key_input = form_data.get("key")
         key = str(key_input) if key_input else ""
 
         if not key:
-            return RedirectResponse(url="/login", status_code=303)
+            return RedirectResponse(url=f"/login?redirect={redirect_url}", status_code=303)
 
         try:
             # Create session and get token
             verified = await self.auth.verify_and_create_session(key, request, response)
             if not verified:
-                return RedirectResponse(url="/login", status_code=303)
+                return RedirectResponse(url=f"/login?redirect={redirect_url}", status_code=303)
 
             # Get the latest session
             latest_session = list(self.session_manager.sessions.values())[-1]
             logger.debug(f"Using session with token: {latest_session.websocket_token}")
 
-            # Calculate script lengths for integrity checks
-            script_length = self._get_script_length("/static/js/crypto-utils.js")
-
             # Get the session ID that was just created
             session_id = list(self.session_manager.sessions.keys())[-1]
             
-            # Create the template response
-            template_response = templates.TemplateResponse(
-                "editor.html",
-                {
-                    "request": request,
-                    "host_ip": html.escape(str(settings.host_ip)),
-                    "token": html.escape(latest_session.websocket_token or ""),
-                    "blue": html.escape(settings.blue_color),
-                    "cert_fingerprint": html.escape(self.cert_fingerprint or ""),
-                    "script_length": int(script_length),  # Already safe as int
-                    "shared_key": html.escape(self.session_manager.shared_encryption_key or ""),
-                },
-            )
+            # Create redirect response to the requested URL
+            redirect_response = RedirectResponse(url=str(redirect_url), status_code=303)
 
-            # Set the session cookie on the new response
-            self.session_manager._set_cookie(template_response, session_id)
+            # Set the session cookie on the redirect response
+            self.session_manager._set_cookie(redirect_response, session_id)
 
-            return template_response
+            return redirect_response
         except Exception as e:
             logger.error(f"Error in post route: {e}", exc_info=True)
-            return RedirectResponse(url="/login", status_code=303)
+            return RedirectResponse(url=f"/login?redirect={redirect_url}", status_code=303)
 
     def _get_script_length(self, script_path: str) -> int:
         """Get the length of a script file for integrity checks."""
@@ -287,23 +299,66 @@ class BlueApp:
                 from urllib.parse import urlparse
                 parsed_origin = urlparse(origin)
                 
-                # Only allow connections from the same host
-                expected_origins = [
-                    f"https://{settings.host_ip}:{settings.port}",
-                    f"https://localhost:{settings.port}",
-                    f"https://127.0.0.1:{settings.port}"
-                ]
-                
-                # Also allow the hostname if different from IP
+                # Allow connections from localhost and LAN
                 import socket
-                try:
-                    hostname = socket.gethostname()
-                    expected_origins.append(f"https://{hostname}:{settings.port}")
-                except Exception:
-                    pass
+                import ipaddress
                 
-                if origin not in expected_origins:
+                # Check if origin matches allowed patterns
+                origin_valid = False
+                
+                # Extract host from origin
+                origin_host = None
+                origin_port = None
+                try:
+                    from urllib.parse import urlparse
+                    parsed = urlparse(origin)
+                    origin_host = parsed.hostname
+                    origin_port = parsed.port
+                    
+                    # Check port matches first
+                    if origin_port == settings.port:
+                        # Check exact matches
+                        if origin_host in ["localhost", "127.0.0.1", settings.host_ip]:
+                            origin_valid = True
+                        
+                        # Check if origin_host is actually this server's IP
+                        # Sometimes settings.host_ip might be 0.0.0.0 but actual IP is different
+                        if not origin_valid:
+                            try:
+                                # Get all IP addresses of this host
+                                hostname = socket.gethostname()
+                                host_ips = socket.gethostbyname_ex(hostname)[2]
+                                if origin_host in host_ips:
+                                    origin_valid = True
+                                    
+                                # Also check if origin_host matches hostname
+                                if origin_host == hostname:
+                                    origin_valid = True
+                            except Exception as e:
+                                logger.debug(f"Error getting host IPs: {e}")
+                        
+                        # Check if origin is from same subnet (for LAN access)
+                        if not origin_valid:
+                            try:
+                                origin_ip = ipaddress.ip_address(origin_host)
+                                if origin_ip.is_private:
+                                    # For private IPs, allow same /24 subnet
+                                    if settings.host_ip != "0.0.0.0":
+                                        server_network = ipaddress.ip_network(f"{settings.host_ip}/24", strict=False)
+                                        if origin_ip in server_network:
+                                            origin_valid = True
+                                    else:
+                                        # If server bound to 0.0.0.0, allow any private IP
+                                        origin_valid = True
+                            except (ValueError, TypeError) as e:
+                                logger.debug(f"Error checking subnet: {e}")
+                
+                except Exception as e:
+                    logger.debug(f"Error parsing origin: {e}")
+                
+                if not origin_valid:
                     logger.warning(f"WebSocket connection rejected - invalid origin: {origin}")
+                    logger.debug(f"Origin details - host: {origin_host}, port: {origin_port}, settings.host_ip: {settings.host_ip}, settings.port: {settings.port}")
                     await websocket.close(code=4002)
                     return
             else:
@@ -421,6 +476,26 @@ class BlueApp:
                 elif msg.type == "process-list":
                     # Handle process list request
                     await self.ws_manager.handle_process_list(websocket)
+                    
+                elif msg.type == "mcp-service-list":
+                    # Handle MCP service list request
+                    await self.ws_manager.handle_mcp_service_list(websocket)
+                    
+                elif msg.type == "mcp-service-start" and msg.serviceName:
+                    # Handle MCP service start request
+                    await self.ws_manager.handle_mcp_service_start(websocket, msg.serviceName)
+                    
+                elif msg.type == "mcp-service-stop" and msg.serviceName:
+                    # Handle MCP service stop request
+                    await self.ws_manager.handle_mcp_service_stop(websocket, msg.serviceName)
+                    
+                elif msg.type == "mcp-request":
+                    # Handle MCP protocol request routing
+                    await self.ws_manager.handle_mcp_request(websocket, msg)
+                    
+                elif msg.type == "mcp-response":
+                    # Handle MCP protocol response routing
+                    await self.ws_manager.handle_mcp_response(websocket, msg)
 
         except WebSocketDisconnect:
             logger.info("WebSocket disconnected normally")

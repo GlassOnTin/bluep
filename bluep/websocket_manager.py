@@ -12,6 +12,7 @@ from starlette.websockets import WebSocketState
 from .models import ConnectionState, WebSocketMessage
 from .process_manager import ProcessManager
 from .session_manager import SessionManager
+from .mcp_service_manager import MCPServiceManager
 
 logger = logging.getLogger(__name__)
 
@@ -40,6 +41,15 @@ class WebSocketManager:
         self.available_files: Dict[str, Dict[str, Any]] = {}  # fileId -> file metadata
         self.process_manager = ProcessManager()
         self._process_tasks: Dict[str, asyncio.Task] = {}  # processId -> output monitor task
+        
+        # Initialize MCP service manager
+        from pathlib import Path
+        mcp_services_dir = Path(__file__).parent.parent / "mcp-services"
+        self.mcp_service_manager = MCPServiceManager(mcp_services_dir, self.process_manager)
+        
+        # MCP routing information
+        self.mcp_service_clients: Dict[str, str] = {}  # service_name -> hosting_session_id
+        self.mcp_client_proxies: Dict[str, Dict[str, Any]] = {}  # session_id -> proxy info
 
     async def transition_state(
         self,
@@ -172,6 +182,11 @@ class WebSocketManager:
         # Finally handle disconnections
         for connection in disconnected:
             await self.disconnect(connection, reason="broadcast_error")
+    
+    def _get_session_id_for_websocket(self, websocket: WebSocket) -> Optional[str]:
+        """Get the session ID associated with a WebSocket connection."""
+        info = self.active_connections.get(websocket)
+        return info.session_id if info else None
     
     async def _broadcast_to_session(
         self, session_id: str, message: Dict[str, Any]
@@ -671,4 +686,153 @@ class WebSocketManager:
         except Exception as e:
             logger.error(f"Error monitoring process {process_id}: {e}", exc_info=True)
             # Clean up task from tracking on error
+            self._process_tasks.pop(process_id, None)
+    
+    async def handle_mcp_service_list(self, websocket: WebSocket) -> None:
+        """Handle request to list available MCP services."""
+        try:
+            # Discover services if not already done
+            await self.mcp_service_manager.discover_services()
+            
+            services = []
+            for service in self.mcp_service_manager.list_services():
+                services.append({
+                    "name": service.name,
+                    "status": service.status.value,
+                    "port": service.port,
+                    "hostingSession": self.mcp_service_clients.get(service.name)
+                })
+            
+            await websocket.send_json({
+                "type": "mcp-service-list",
+                "mcpServices": services
+            })
+        except Exception as e:
+            logger.error(f"Error listing MCP services: {e}")
+            await websocket.send_json({
+                "type": "error",
+                "error": f"Failed to list MCP services: {str(e)}"
+            })
+    
+    async def handle_mcp_service_start(self, websocket: WebSocket, service_name: str) -> None:
+        """Handle request to start an MCP service."""
+        try:
+            session_id = self._get_session_id_for_websocket(websocket)
+            if not session_id:
+                raise ValueError("No session found")
+            
+            # Start the service
+            process_info = await self.mcp_service_manager.start_service(service_name, session_id)
+            
+            # Track which session is hosting this service
+            self.mcp_service_clients[service_name] = session_id
+            
+            # Get service info
+            service = self.mcp_service_manager.get_service_info(service_name)
+            
+            # Notify all clients about service availability
+            await self.broadcast({
+                "type": "mcp-service-status",
+                "serviceName": service_name,
+                "status": "running",
+                "port": service.port,
+                "hostingSession": session_id
+            })
+            
+            # Start monitoring the MCP service process
+            task = asyncio.create_task(self._monitor_process_output(process_info.process_id, session_id))
+            self._process_tasks[process_info.process_id] = task
+            
+        except Exception as e:
+            logger.error(f"Error starting MCP service {service_name}: {e}")
+            await websocket.send_json({
+                "type": "error",
+                "error": f"Failed to start MCP service: {str(e)}"
+            })
+    
+    async def handle_mcp_service_stop(self, websocket: WebSocket, service_name: str) -> None:
+        """Handle request to stop an MCP service."""
+        try:
+            session_id = self._get_session_id_for_websocket(websocket)
+            if not session_id:
+                raise ValueError("No session found")
+            
+            # Check if this session is hosting the service
+            hosting_session = self.mcp_service_clients.get(service_name)
+            if hosting_session != session_id:
+                raise ValueError("Service is hosted by another session")
+            
+            # Stop the service
+            await self.mcp_service_manager.stop_service(service_name)
+            
+            # Remove tracking
+            self.mcp_service_clients.pop(service_name, None)
+            
+            # Notify all clients
+            await self.broadcast({
+                "type": "mcp-service-status",
+                "serviceName": service_name,
+                "status": "stopped"
+            })
+            
+        except Exception as e:
+            logger.error(f"Error stopping MCP service {service_name}: {e}")
+            await websocket.send_json({
+                "type": "error",
+                "error": f"Failed to stop MCP service: {str(e)}"
+            })
+    
+    async def handle_mcp_request(self, websocket: WebSocket, msg: WebSocketMessage) -> None:
+        """Route MCP protocol requests between clients."""
+        try:
+            if not msg.serviceName or not msg.mcpPayload:
+                raise ValueError("Missing service name or payload")
+            
+            session_id = self._get_session_id_for_websocket(websocket)
+            if not session_id:
+                raise ValueError("No session found")
+            
+            # Find which session is hosting this service
+            hosting_session = self.mcp_service_clients.get(msg.serviceName)
+            if not hosting_session:
+                raise ValueError(f"Service {msg.serviceName} is not running")
+            
+            # Route the request to the hosting session
+            message = {
+                "type": "mcp-request",
+                "serviceName": msg.serviceName,
+                "mcpPayload": msg.mcpPayload,
+                "targetClient": session_id  # So we know where to send response
+            }
+            
+            await self._broadcast_to_session(hosting_session, message)
+            
+        except Exception as e:
+            logger.error(f"Error routing MCP request: {e}")
+            await websocket.send_json({
+                "type": "error",
+                "error": f"Failed to route MCP request: {str(e)}"
+            })
+    
+    async def handle_mcp_response(self, websocket: WebSocket, msg: WebSocketMessage) -> None:
+        """Route MCP protocol responses back to requesting clients."""
+        try:
+            if not msg.targetClient or not msg.mcpPayload:
+                raise ValueError("Missing target client or payload")
+            
+            # Route the response to the requesting client
+            message = {
+                "type": "mcp-response",
+                "serviceName": msg.serviceName,
+                "mcpPayload": msg.mcpPayload
+            }
+            
+            await self._broadcast_to_session(msg.targetClient, message)
+            
+        except Exception as e:
+            logger.error(f"Error routing MCP response: {e}")
+            await websocket.send_json({
+                "type": "error",
+                "error": f"Failed to route MCP response: {str(e)}"
+            })
             self._process_tasks.pop(process_id, None)

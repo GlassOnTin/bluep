@@ -164,3 +164,8 @@ cython_debug/
 
 all.txt
 *.kate-swp
+
+# MCP Services
+mcp-services/
+!mcp-services/.gitkeep
+!mcp-services/README.md

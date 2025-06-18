@@ -1,0 +1,565 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>bluep MCP Services</title>
+    <link rel="icon" type="image/png" href="/favicon.png">
+    <style>
+        body, html {
+            margin: 0;
+            padding: 0;
+            height: 100vh;
+            background: #1a1a2e;
+            color: #e0e0e0;
+            font-family: 'Monaco', 'Menlo', 'Ubuntu Mono', monospace;
+            overflow-x: hidden;
+        }
+        
+        .container {
+            max-width: 1200px;
+            margin: 0 auto;
+            padding: 20px;
+        }
+        
+        .header {
+            background: #16213e;
+            padding: 20px;
+            margin-bottom: 30px;
+            border-radius: 8px;
+            box-shadow: 0 4px 6px rgba(0, 0, 0, 0.3);
+        }
+        
+        .header h1 {
+            margin: 0;
+            color: #3498db;
+            font-size: 28px;
+        }
+        
+        .header p {
+            margin: 5px 0 0 0;
+            color: #aaa;
+        }
+        
+        .section {
+            background: #0f0f23;
+            padding: 20px;
+            margin-bottom: 20px;
+            border-radius: 8px;
+            box-shadow: 0 4px 6px rgba(0, 0, 0, 0.3);
+        }
+        
+        .section h2 {
+            margin-top: 0;
+            color: #3498db;
+            font-size: 20px;
+            border-bottom: 1px solid #2a2a4e;
+            padding-bottom: 10px;
+        }
+        
+        .service-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fill, minmax(300px, 1fr));
+            gap: 15px;
+            margin-top: 15px;
+        }
+        
+        .service-card {
+            background: #16213e;
+            padding: 15px;
+            border-radius: 5px;
+            border: 1px solid #2a2a4e;
+            transition: all 0.2s;
+        }
+        
+        .service-card:hover {
+            border-color: #3498db;
+            box-shadow: 0 2px 8px rgba(52, 152, 219, 0.2);
+        }
+        
+        .service-name {
+            font-size: 18px;
+            font-weight: bold;
+            color: #fff;
+            margin-bottom: 5px;
+        }
+        
+        .service-status {
+            display: inline-block;
+            padding: 3px 8px;
+            border-radius: 3px;
+            font-size: 12px;
+            margin-bottom: 10px;
+        }
+        
+        .status-available { background: #2a4e2a; color: #4a9a4a; }
+        .status-running { background: #2a4e2a; color: #23d18b; }
+        .status-installing { background: #4e4e2a; color: #e5e510; }
+        .status-failed { background: #4e2a2a; color: #f14c4c; }
+        
+        .service-actions {
+            display: flex;
+            gap: 10px;
+            margin-top: 10px;
+        }
+        
+        .btn {
+            padding: 6px 12px;
+            border: none;
+            border-radius: 4px;
+            cursor: pointer;
+            font-size: 14px;
+            transition: all 0.2s;
+            font-family: inherit;
+        }
+        
+        .btn-primary {
+            background: #3498db;
+            color: white;
+        }
+        
+        .btn-primary:hover {
+            background: #2980b9;
+        }
+        
+        .btn-danger {
+            background: #e74c3c;
+            color: white;
+        }
+        
+        .btn-danger:hover {
+            background: #c0392b;
+        }
+        
+        .btn:disabled {
+            opacity: 0.5;
+            cursor: not-allowed;
+        }
+        
+        .proxy-guide {
+            background: #1a2a3a;
+            padding: 15px;
+            border-radius: 5px;
+            margin-top: 15px;
+            border: 1px solid #2a3a4a;
+        }
+        
+        .code-block {
+            background: #0a0a1a;
+            padding: 15px;
+            border-radius: 5px;
+            font-family: 'Monaco', 'Menlo', monospace;
+            font-size: 13px;
+            overflow-x: auto;
+            margin: 10px 0;
+            position: relative;
+        }
+        
+        .copy-btn {
+            position: absolute;
+            top: 5px;
+            right: 5px;
+            padding: 4px 8px;
+            font-size: 12px;
+            background: #2a2a4e;
+            color: #fff;
+            border: none;
+            border-radius: 3px;
+            cursor: pointer;
+        }
+        
+        .copy-btn:hover {
+            background: #3a3a5e;
+        }
+        
+        .tabs {
+            display: flex;
+            gap: 5px;
+            margin-bottom: 15px;
+            border-bottom: 1px solid #2a2a4e;
+        }
+        
+        .tab {
+            padding: 10px 20px;
+            background: none;
+            border: none;
+            color: #aaa;
+            cursor: pointer;
+            font-family: inherit;
+            font-size: 16px;
+            border-bottom: 2px solid transparent;
+            transition: all 0.2s;
+        }
+        
+        .tab.active {
+            color: #3498db;
+            border-bottom-color: #3498db;
+        }
+        
+        .tab:hover {
+            color: #fff;
+        }
+        
+        .tab-content {
+            display: none;
+        }
+        
+        .tab-content.active {
+            display: block;
+        }
+        
+        .session-info {
+            background: #2a3a4a;
+            padding: 10px;
+            border-radius: 5px;
+            margin-bottom: 15px;
+            font-size: 14px;
+        }
+        
+        .session-token {
+            font-family: monospace;
+            background: #1a2a3a;
+            padding: 2px 6px;
+            border-radius: 3px;
+            word-break: break-all;
+        }
+        
+        .loading {
+            text-align: center;
+            padding: 40px;
+            color: #666;
+        }
+        
+        .error-message {
+            background: #4e2a2a;
+            color: #f14c4c;
+            padding: 10px;
+            border-radius: 5px;
+            margin: 10px 0;
+        }
+        
+        .success-message {
+            background: #2a4e2a;
+            color: #23d18b;
+            padding: 10px;
+            border-radius: 5px;
+            margin: 10px 0;
+        }
+        
+        /* Navigation bar */
+        .main-nav {
+            background: #0a0a1a;
+            padding: 10px 20px;
+            margin: -20px -20px 20px -20px;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            border-bottom: 1px solid #2a2a4e;
+        }
+        
+        .nav-links {
+            display: flex;
+            gap: 20px;
+        }
+        
+        .nav-link {
+            color: #aaa;
+            text-decoration: none;
+            font-size: 14px;
+            transition: color 0.2s;
+        }
+        
+        .nav-link:hover {
+            color: #3498db;
+        }
+        
+        .nav-link.active {
+            color: #3498db;
+            font-weight: bold;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="main-nav">
+            <div class="nav-links">
+                <a href="/" class="nav-link">Editor</a>
+                <a href="/terminal" class="nav-link">Terminal</a>
+                <a href="/mcp" class="nav-link active">MCP Services</a>
+            </div>
+            <div style="color: #666; font-size: 12px;">bluep</div>
+        </div>
+        <div class="header">
+            <h1>MCP Services</h1>
+            <p>Manage and access Model Context Protocol services</p>
+        </div>
+        
+        <div id="main-content">
+            <div class="loading">Loading MCP services...</div>
+        </div>
+    </div>
+    
+    <script>
+        let ws = null;
+        let services = [];
+        const wsToken = "{{token}}";
+        const sessionCookie = "{{session_cookie}}";
+        let sessionToken = sessionCookie;
+        
+        // Get session token from cookie
+        function getSessionToken() {
+            const cookies = document.cookie.split(';');
+            for (const cookie of cookies) {
+                const [name, value] = cookie.trim().split('=');
+                if (name === 'session') {
+                    return value;
+                }
+            }
+            return null;
+        }
+        
+        // Initialize WebSocket connection
+        function initWebSocket() {
+            if (!wsToken) {
+                showError('No session token found. Please log in.');
+                return;
+            }
+            
+            // Use the session cookie value from server
+            if (!sessionToken || sessionToken === 'None') {
+                sessionToken = getSessionToken() || sessionCookie;
+            }
+            
+            const wsUrl = `wss://${window.location.host}/ws?token=${encodeURIComponent(wsToken)}`;
+            ws = new WebSocket(wsUrl);
+            
+            ws.onopen = () => {
+                console.log('WebSocket connected');
+                // Request MCP service list
+                ws.send(JSON.stringify({ type: 'mcp-service-list' }));
+            };
+            
+            ws.onmessage = (event) => {
+                const msg = JSON.parse(event.data);
+                handleMessage(msg);
+            };
+            
+            ws.onerror = (error) => {
+                console.error('WebSocket error:', error);
+                showError('Connection error. Please refresh the page.');
+            };
+            
+            ws.onclose = () => {
+                console.log('WebSocket closed');
+                setTimeout(initWebSocket, 3000); // Reconnect after 3 seconds
+            };
+        }
+        
+        // Handle incoming WebSocket messages
+        function handleMessage(msg) {
+            switch (msg.type) {
+                case 'mcp-service-list':
+                    services = msg.mcpServices || [];
+                    renderServices();
+                    break;
+                case 'mcp-service-status':
+                    updateServiceStatus(msg.serviceName, msg.status, msg.port, msg.hostingSession);
+                    break;
+                case 'error':
+                    showError(msg.error);
+                    break;
+            }
+        }
+        
+        // Render the main UI
+        function renderServices() {
+            const mainContent = document.getElementById('main-content');
+            
+            mainContent.innerHTML = `
+                <div class="tabs">
+                    <button class="tab active" onclick="showTab('services')">Services</button>
+                    <button class="tab" onclick="showTab('client')">Client Setup</button>
+                </div>
+                
+                <div id="services-tab" class="tab-content active">
+                    <div class="section">
+                        <h2>Available MCP Services</h2>
+                        <div id="services-list" class="service-grid">
+                            ${renderServicesList()}
+                        </div>
+                    </div>
+                </div>
+                
+                <div id="client-tab" class="tab-content">
+                    <div class="section">
+                        <h2>Connect from Another Client</h2>
+                        <div class="session-info">
+                            Your session token: <span class="session-token">${sessionToken}</span>
+                            <button class="copy-btn" onclick="copyToClipboard('${sessionToken}')">Copy</button>
+                        </div>
+                        
+                        <div class="proxy-guide">
+                            <h3>Option 1: Install MCP Client (Recommended)</h3>
+                            <div class="code-block">
+                                pip install bluep-mcp-client
+                                bluep-mcp auth --token ${sessionToken}
+                                bluep-mcp proxy SERVICE_NAME --server wss://${window.location.host}/ws --port 4000
+                                <button class="copy-btn" onclick="copyInstallCommands()">Copy</button>
+                            </div>
+                            
+                            <h3>Option 2: Download Standalone Script</h3>
+                            <div class="code-block">
+                                wget https://raw.githubusercontent.com/glassontin/bluep/main/bluep_mcp_standalone.py
+                                python bluep_mcp_standalone.py proxy SERVICE_NAME --server wss://${window.location.host}/ws --token ${sessionToken} --port 4000
+                                <button class="copy-btn" onclick="copyStandaloneCommands()">Copy</button>
+                            </div>
+                            
+                            <h3>Configure Claude</h3>
+                            <p>Once the proxy is running, add this to your Claude MCP configuration:</p>
+                            <div class="code-block">
+{
+  "mcpServers": {
+    "SERVICE_NAME": {
+      "command": "curl",
+      "args": ["-X", "POST", "http://localhost:4000"]
+    }
+  }
+}
+                                <button class="copy-btn" onclick="copyClaudeConfig()">Copy</button>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            `;
+        }
+        
+        // Render services list
+        function renderServicesList() {
+            if (services.length === 0) {
+                return '<p>No MCP services found. Install services in the mcp-services directory.</p>';
+            }
+            
+            return services.map(service => `
+                <div class="service-card">
+                    <div class="service-name">${service.name}</div>
+                    <span class="service-status status-${service.status}">${service.status}</span>
+                    ${service.hostingSession ? `<div style="font-size: 12px; color: #666;">Hosted by: ${service.hostingSession.substring(0, 8)}...</div>` : ''}
+                    ${service.port ? `<div style="font-size: 12px; color: #666;">Port: ${service.port}</div>` : ''}
+                    <div class="service-actions">
+                        ${renderServiceActions(service)}
+                    </div>
+                </div>
+            `).join('');
+        }
+        
+        // Render service action buttons
+        function renderServiceActions(service) {
+            switch (service.status) {
+                case 'available':
+                    return `<button class="btn btn-primary" onclick="startService('${service.name}')">Start</button>`;
+                case 'running':
+                    if (service.hostingSession === sessionToken) {
+                        return `<button class="btn btn-danger" onclick="stopService('${service.name}')">Stop</button>`;
+                    } else {
+                        return `<button class="btn" disabled>Running on another client</button>`;
+                    }
+                case 'installing':
+                    return `<button class="btn" disabled>Installing...</button>`;
+                default:
+                    return `<button class="btn" disabled>Unavailable</button>`;
+            }
+        }
+        
+        // Service management functions
+        function startService(serviceName) {
+            ws.send(JSON.stringify({
+                type: 'mcp-service-start',
+                serviceName: serviceName
+            }));
+        }
+        
+        function stopService(serviceName) {
+            ws.send(JSON.stringify({
+                type: 'mcp-service-stop',
+                serviceName: serviceName
+            }));
+        }
+        
+        // Update service status
+        function updateServiceStatus(serviceName, status, port, hostingSession) {
+            const service = services.find(s => s.name === serviceName);
+            if (service) {
+                service.status = status;
+                service.port = port;
+                service.hostingSession = hostingSession;
+                renderServices();
+            }
+        }
+        
+        // Tab switching
+        function showTab(tabName) {
+            // Update tab buttons
+            document.querySelectorAll('.tab').forEach(tab => {
+                tab.classList.remove('active');
+            });
+            event.target.classList.add('active');
+            
+            // Update tab content
+            document.querySelectorAll('.tab-content').forEach(content => {
+                content.classList.remove('active');
+            });
+            document.getElementById(`${tabName}-tab`).classList.add('active');
+        }
+        
+        // Copy functions
+        function copyToClipboard(text) {
+            navigator.clipboard.writeText(text).then(() => {
+                showSuccess('Copied to clipboard!');
+            });
+        }
+        
+        function copyInstallCommands() {
+            const commands = `pip install bluep-mcp-client
+bluep-mcp auth --token ${sessionToken}
+bluep-mcp proxy SERVICE_NAME --server wss://${window.location.host}/ws --port 4000`;
+            copyToClipboard(commands);
+        }
+        
+        function copyStandaloneCommands() {
+            const commands = `wget https://raw.githubusercontent.com/glassontin/bluep/main/bluep_mcp_standalone.py
+python bluep_mcp_standalone.py proxy SERVICE_NAME --server wss://${window.location.host}/ws --token ${sessionToken} --port 4000`;
+            copyToClipboard(commands);
+        }
+        
+        function copyClaudeConfig() {
+            const config = `{
+  "mcpServers": {
+    "SERVICE_NAME": {
+      "command": "curl",
+      "args": ["-X", "POST", "http://localhost:4000"]
+    }
+  }
+}`;
+            copyToClipboard(config);
+        }
+        
+        // Show messages
+        function showError(message) {
+            const msg = document.createElement('div');
+            msg.className = 'error-message';
+            msg.textContent = message;
+            document.querySelector('.container').insertBefore(msg, document.querySelector('.header').nextSibling);
+            setTimeout(() => msg.remove(), 5000);
+        }
+        
+        function showSuccess(message) {
+            const msg = document.createElement('div');
+            msg.className = 'success-message';
+            msg.textContent = message;
+            document.querySelector('.container').insertBefore(msg, document.querySelector('.header').nextSibling);
+            setTimeout(() => msg.remove(), 3000);
+        }
+        
+        // Initialize on load
+        initWebSocket();
+    </script>
+</body>
+</html>

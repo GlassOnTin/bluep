@@ -197,12 +197,51 @@
         #terminal-output::-webkit-scrollbar-thumb:hover {
             background: #3a3a5e;
         }
+        
+        /* Navigation bar */
+        .nav-bar {
+            background: #0a0a1a;
+            padding: 10px 20px;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            border-bottom: 1px solid #2a2a4e;
+        }
+        
+        .nav-links {
+            display: flex;
+            gap: 20px;
+        }
+        
+        .nav-link {
+            color: #aaa;
+            text-decoration: none;
+            font-size: 14px;
+            transition: color 0.2s;
+        }
+        
+        .nav-link:hover {
+            color: #3498db;
+        }
+        
+        .nav-link.active {
+            color: #3498db;
+            font-weight: bold;
+        }
     </style>
     <script src="/static/js/crypto-utils.js"></script>
     <script src="/static/js/lib/xterm.min.js"></script>
     <script src="/static/js/lib/xterm-addon-fit.min.js"></script>
 </head>
 <body>
+    <div class="nav-bar">
+        <div class="nav-links">
+            <a href="/" class="nav-link">Editor</a>
+            <a href="/terminal" class="nav-link active">Terminal</a>
+            <a href="/mcp" class="nav-link">MCP Services</a>
+        </div>
+        <div style="color: #666; font-size: 12px;">bluep</div>
+    </div>
     <div id="command-selector">
         <button class="command-btn" data-command="bash">Bash</button>
         <button class="command-btn" data-command="python">Python</button>
@@ -258,7 +297,7 @@
                 console.log('Switching Terminal:', switchingTerminal);
                 console.log('Processing Messages:', processingMessages);
                 console.log('WebSocket State:', ws ? ws.readyState : 'null');
-                console.log('Message Queue Length:', messageQueue.length);
+                // Message queue check
                 console.log('Terminals:', Object.keys(terminals).map(id => ({
                     id: id.substring(0, 8),
                     active: terminals[id].active,
@@ -282,7 +321,7 @@
                 if (activeTerminalId && terminals[activeTerminalId]) {
                     terminals[activeTerminalId].terminal.focus();
                 }
-                console.log('Reset complete');
+                // Reset complete
             }
         });
         
@@ -319,7 +358,7 @@
         (async function() {
             try {
                 sharedSecret = await createKeyFromSharedString(sharedKeyStr);
-                console.log("Shared encryption key setup completed");
+                // Encryption key ready
             } catch (e) {
                 console.warn("Error with shared key:", e);
                 sharedSecret = await fallbackToTokenBasedKey(token);
@@ -332,24 +371,24 @@
         function initializeWebSocket() {
             // Don't create new connection if one already exists
             if (ws && (ws.readyState === WebSocket.CONNECTING || ws.readyState === WebSocket.OPEN)) {
-                console.log('WebSocket already exists in state:', ws.readyState);
+                // WebSocket already exists
                 return;
             }
             
             const wsUrl = `wss://${window.location.host}/ws?token=${encodeURIComponent(token)}`;
-            console.log('Connecting to WebSocket:', wsUrl);
+            // Connecting to WebSocket
             ws = new WebSocket(wsUrl);
             
             ws.onopen = () => {
                 isConnected = true;
-                console.log('Connected to server');
+                // Connected
                 
                 // Clear message queue
                 messageQueue = [];
                 processingMessages = false;
                 
                 // Request process list immediately
-                console.log('Requesting process list');
+                // Request process list
                 try {
                     ws.send(JSON.stringify({ type: "process-list" }));
                 } catch (e) {
@@ -376,7 +415,7 @@
                     // Try to reconnect for abnormal closures
                     showError(`WebSocket disconnected (${event.code}). Trying to reconnect...`);
                     setTimeout(() => {
-                        console.log('Attempting to reconnect WebSocket...');
+                        // Attempting to reconnect
                         initializeWebSocket();
                     }, 2000);
                 }
@@ -389,7 +428,7 @@
             ws.onmessage = async (event) => {
                 try {
                     const msg = JSON.parse(event.data);
-                    console.log('Received message type:', msg.type);
+                    // Received message
                     lastMessageTime = Date.now();
                     
                     // Queue message for processing
@@ -410,19 +449,19 @@
             }
             
             processingMessages = true;
-            console.log(`Processing ${messageQueue.length} queued messages`);
+            // Processing messages
             
             try {
                 while (messageQueue.length > 0) {
                     const msg = messageQueue.shift();
-                    console.log(`Processing message: ${msg.type}`);
+                    // Handle message
                     
                     if (msg.type === "ping") {
-                        console.log('Received ping, sending pong...');
+                        // Ping received
                         if (ws && ws.readyState === WebSocket.OPEN) {
                             try {
                                 ws.send(JSON.stringify({type: "pong"}));
-                                console.log('Pong sent successfully');
+                                // Pong sent
                             } catch (e) {
                                 console.error('Error sending pong:', e);
                             }
@@ -441,10 +480,10 @@
                         showError(errorMsg);
                     } else if (msg.type === "content") {
                         // Handle content message (ignore for terminal)
-                        console.log('Ignoring content message in terminal');
+                        // Skip content message in terminal mode
                     } else if (msg.type === "clients") {
                         // Handle clients message (ignore for terminal)
-                        console.log(`Clients connected: ${msg.count}`);
+                        // Update client count
                     } else {
                         console.warn(`Unknown message type: ${msg.type}`);
                     }
@@ -472,7 +511,7 @@
                 console.warn('No messages received for 60 seconds, connection may be stale');
                 // Only reconnect if the WebSocket is actually closed
                 if (ws.readyState !== WebSocket.OPEN && ws.readyState !== WebSocket.CONNECTING) {
-                    console.log('WebSocket is closed, attempting to reconnect');
+                    // WebSocket closed, reconnecting
                     setTimeout(() => initializeWebSocket(), 1000);
                 }
             }
@@ -503,7 +542,7 @@
                     e.preventDefault();
                     e.stopPropagation();
                     const command = btn.dataset.command;
-                    console.log(`Welcome button clicked: ${command}`);
+                    // Welcome button clicked
                     
                     // Check WebSocket state
                     if (!isConnected || !ws || ws.readyState !== WebSocket.OPEN) {
@@ -516,7 +555,7 @@
                     document.getElementById('welcome-screen').style.display = 'none';
                     
                     // Spawn terminal
-                    console.log(`Spawning terminal: ${command}`);
+                    // Spawning terminal
                     spawnTerminal(command);
                 });
             });
@@ -543,14 +582,14 @@
                 return;
             }
             
-            console.log(`Sending spawn request for: ${command}`);
+            // Sending spawn request
             try {
                 const message = JSON.stringify({
                     type: "process-spawn",
                     command: command
                 });
                 ws.send(message);
-                console.log('Spawn request sent successfully');
+                // Spawn request sent
             } catch (e) {
                 console.error('Error spawning terminal:', e);
                 showError('Failed to spawn terminal');
@@ -597,7 +636,7 @@
                         if (isConnected && ws && ws.readyState === WebSocket.OPEN && 
                             activeTerminalId === pid && terminals[pid] && terminals[pid].active) {
                             try {
-                                console.log(`Sending input for terminal ${pid}: ${data.charCodeAt(0)}`);
+                                // Send input (not logging keystrokes for security)
                                 ws.send(JSON.stringify({
                                     type: "process-input",
                                     processId: pid,
@@ -641,7 +680,7 @@
                     terminals[processId].terminating = false;  // Reset terminating flag
                     updateTerminalTab(processId);
                     terminals[processId].terminal.write(`\r\n[Process ${status}]\r\n`);
-                    console.log(`Terminal ${processId} marked as ${status}, terminating flag reset`);
+                    // Terminal status updated
                     
                     // Auto-close terminal after showing status
                     setTimeout(() => {
@@ -722,12 +761,12 @@
                 return;
             }
             
-            console.log(`Received process list with ${processes.length} processes`);
+            // Process list received
             
             // Restore existing terminals
             processes.forEach(proc => {
                 if (!terminals[proc.process_id]) {
-                    console.log(`Creating terminal for process ${proc.process_id}`);
+                    // Creating terminal
                     // Create xterm.js terminal for existing process
                     const term = new Terminal(terminalOptions);
                     const fitAddon = new FitAddon.FitAddon();
@@ -760,7 +799,7 @@
                             if (isConnected && ws && ws.readyState === WebSocket.OPEN && 
                                 activeTerminalId === pid && terminals[pid] && terminals[pid].active) {
                                 try {
-                                    console.log(`Sending input for terminal ${pid}: ${data.charCodeAt(0)}`);
+                                    // Send input (not logging keystrokes for security)
                                     ws.send(JSON.stringify({
                                         type: "process-input",
                                         processId: pid,
@@ -828,7 +867,7 @@
                         terminateProcess(processId);
                     }
                 } else {
-                    console.log(`Tab click switching to terminal ${processId}`);
+                    // Tab clicked
                     switchToTerminal(processId);
                 }
             });
@@ -850,7 +889,7 @@
             
             // Prevent rapid switching
             if (switchingTerminal) {
-                console.log('Already switching terminals, ignoring request');
+                // Already switching, ignore
                 return;
             }
             
@@ -861,7 +900,7 @@
             
             // Don't switch to terminals that are being terminated
             if (terminals[processId].terminating) {
-                console.log(`Cannot switch to terminating terminal ${processId}`);
+                // Cannot switch to terminating terminal
                 // Try to find another active terminal
                 const alternativeIds = Object.keys(terminals).filter(id => 
                     id !== processId && 
@@ -870,7 +909,7 @@
                     !terminals[id].terminating
                 );
                 if (alternativeIds.length > 0) {
-                    console.log(`Switching to alternative terminal ${alternativeIds[0]}`);
+                    // Switch to alternative terminal
                     switchToTerminal(alternativeIds[0]);
                 }
                 return;
@@ -880,9 +919,9 @@
             // Just skip the active check - inactive terminals can be viewed
             
             if (activeTerminalId !== null) {
-                console.log(`Switching from terminal ${activeTerminalId} to ${processId}`);
+                // Switching terminal
             } else {
-                console.log(`Activating terminal ${processId} (no previous active terminal)`);
+                // Activating terminal
             }
             switchingTerminal = true;
             
@@ -977,7 +1016,7 @@
                         if (terminal.active) {
                             // Ensure the terminal is properly focused
                             terminal.terminal.focus();
-                            console.log(`Terminal ${processId} focused`);
+                            // Terminal focused
                             
                             // Force focus on the textarea element if it exists
                             if (terminal.terminal.textarea) {
@@ -987,16 +1026,11 @@
                             // Test if terminal is actually accepting input
                             setTimeout(() => {
                                 if (terminal.terminal.textarea) {
-                                    console.log(`Terminal ${processId} textarea state:`, {
-                                        exists: !!terminal.terminal.textarea,
-                                        focused: document.activeElement === terminal.terminal.textarea,
-                                        disabled: terminal.terminal.textarea.disabled,
-                                        readOnly: terminal.terminal.textarea.readOnly
-                                    });
+                                    // Check textarea state
                                     
                                     // If not focused, try to force focus again
                                     if (document.activeElement !== terminal.terminal.textarea) {
-                                        console.log(`Forcing focus on terminal ${processId} textarea`);
+                                        // Force focus on textarea
                                         terminal.terminal.textarea.focus();
                                     }
                                 }
@@ -1010,7 +1044,7 @@
                     // Check if there are any terminals waiting for cleanup
                     Object.entries(terminals).forEach(([id, term]) => {
                         if (term.readyForCleanup && id !== activeTerminalId) {
-                            console.log(`Cleaning up terminal ${id} after switch completed`);
+                            // Cleanup terminal after switch
                             cleanupTerminal(id);
                         }
                     });
@@ -1118,7 +1152,7 @@
         function showWelcomeScreen() {
             const hasActiveTerminals = Object.values(terminals).some(t => t && t.active);
             if (!hasActiveTerminals) {
-                console.log('Showing welcome screen - no active terminals');
+                // Show welcome screen
                 document.getElementById('welcome-screen').style.display = 'block';
                 
                 // Re-attach event listeners in case they were lost

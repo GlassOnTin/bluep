@@ -58,6 +58,13 @@ class WebSocketMessage(BaseModel):
         "process-terminate",
         "process-list",
         "process-status",
+        "mcp-service-list",
+        "mcp-service-start",
+        "mcp-service-stop",
+        "mcp-service-status",
+        "mcp-request",
+        "mcp-response",
+        "mcp-stream",
     ]
     data: Optional[str] = None
     x: Optional[int] = None
@@ -99,6 +106,11 @@ class WebSocketMessage(BaseModel):
         return v
     outputData: Optional[str] = None  # Base64 encoded process output
     processes: Optional[List[Dict[str, Any]]] = None  # List of processes
+    mcpServices: Optional[List[Dict[str, Any]]] = None  # List of MCP services
+    serviceName: Optional[str] = Field(None, max_length=100)  # MCP service name
+    servicePort: Optional[int] = Field(None, ge=1, le=65535)  # MCP service port
+    mcpPayload: Optional[Dict[str, Any]] = None  # MCP protocol payload
+    targetClient: Optional[str] = None  # Target client ID for MCP routing
 
     @field_validator("data")
     def validate_data(cls, v: Optional[str], info: ValidationInfo) -> str:

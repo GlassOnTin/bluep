@@ -21,6 +21,8 @@ python setup.py
 - Cross-platform configuration storage
 - Auto-discovery of local IP address
 - Blue minimalist interface
+- MCP (Model Context Protocol) service forwarding
+- Built-in terminal with process management
 
 ## Requirements
 - Python 3.7+
@@ -140,6 +142,66 @@ run_bluep_windows.bat
 ```
 
 You can access Bluep in your browser at `https://localhost:8500` or `https://<your-ip-address>:8500` from other devices on your network.
+
+## MCP Service Forwarding
+
+Bluep can host and forward MCP (Model Context Protocol) services, allowing you to run MCP servers on one client and access them from another.
+
+### Installing MCP Services
+
+1. Install an MCP service from a git repository:
+```bash
+cd mcp-services
+git clone https://github.com/Tiberriver256/mcp-server-azure-devops azure-devops
+cd azure-devops
+npm install
+```
+
+2. The service will be automatically discovered by bluep and available for hosting.
+
+### Using MCP Services
+
+1. **Host a service**: From the bluep terminal interface, start an MCP service on one client.
+
+2. **Access from another client**: There are three ways to run the MCP client proxy:
+
+   **Option A: Install the standalone client package** (Recommended)
+   ```bash
+   pip install bluep-mcp-client
+   bluep-mcp auth --token YOUR_SESSION_TOKEN
+   bluep-mcp proxy azure-devops --port 4000
+   ```
+
+   **Option B: Use the single-file script**
+   ```bash
+   # Download the standalone script
+   wget https://raw.githubusercontent.com/glassontin/bluep/main/bluep_mcp_standalone.py
+   
+   # Run it
+   python bluep_mcp_standalone.py proxy azure-devops \
+     --server wss://your-server:8500/ws \
+     --token YOUR_SESSION_TOKEN \
+     --port 4000
+   ```
+
+   **Option C: From the bluep source** (if you have it)
+   ```bash
+   python -m bluep.mcp_client_proxy \
+     --bluep-url wss://your-bluep-server:8500/ws \
+     --session-token YOUR_SESSION_TOKEN \
+     --service azure-devops \
+     --local-port 4000
+   ```
+
+3. Now you can connect to the MCP service at `http://localhost:4000` as if it were running locally.
+
+### MCP Architecture
+
+- MCP services are installed in the `mcp-services/` directory
+- Each service runs as a managed process under bluep
+- WebSocket messages route MCP protocol between clients
+- Client proxy translates local requests to bluep WebSocket messages
+- Full session isolation ensures security between users
 
 ## License
 MIT License
