@@ -57,9 +57,12 @@ class MCPClientProxy:
             "uri": self.bluep_ws_url,
         }
         
-        # Add headers if supported (websockets >= 10.0)
+        # Check websockets version
+        import websockets
+        logger.info(f"Using websockets version: {websockets.__version__}")
+        
+        # Try connecting with proper parameters
         try:
-            # Try with extra_headers first (newer versions)
             if self.bluep_ws_url.startswith("wss://"):
                 if not self.verify_ssl:
                     ssl_context = ssl.create_default_context()
@@ -67,17 +70,27 @@ class MCPClientProxy:
                     ssl_context.verify_mode = ssl.CERT_NONE
                 else:
                     ssl_context = True
-                connect_kwargs["ssl"] = ssl_context
+                
+                self.ws_connection = await websockets.connect(
+                    self.bluep_ws_url,
+                    extra_headers=headers,
+                    ssl=ssl_context
+                )
+            else:
+                self.ws_connection = await websockets.connect(
+                    self.bluep_ws_url,
+                    extra_headers=headers
+                )
             
-            connect_kwargs["extra_headers"] = headers
-            self.ws_connection = await websockets.connect(**connect_kwargs)
             logger.info(f"Connected to bluep server with headers")
             asyncio.create_task(self._handle_messages())
             return
-        except TypeError as e:
+        except Exception as e:
+            logger.error(f"Connection failed: {type(e).__name__}: {e}")
             if "extra_headers" in str(e):
-                logger.warning("Your websockets version doesn't support extra_headers. Using authentication message instead.")
+                logger.warning("Falling back to authentication message method.")
             else:
+                # Re-raise if it's not an extra_headers issue
                 raise
         
         # Fallback: Connect without headers and authenticate via message
@@ -236,4 +249,9 @@ async def main():
 
 
 if __name__ == '__main__':
+    # Handle Windows event loop policy
+    if sys.platform == 'win32':
+        # Windows requires ProactorEventLoop for some operations
+        asyncio.set_event_loop_policy(asyncio.WindowsProactorEventLoopPolicy())
+    
     asyncio.run(main())
