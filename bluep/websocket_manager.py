@@ -887,14 +887,22 @@ class WebSocketManager:
                 "targetClient": session_id  # So we know where to send response
             }
             
+            # Include requestId if present (for browser proxy tracking)
+            if msg.requestId:
+                message["requestId"] = msg.requestId
+            
             await self._broadcast_to_session(hosting_session, message)
             
         except Exception as e:
             logger.error(f"Error routing MCP request: {e}")
-            await websocket.send_json({
+            error_response = {
                 "type": "error",
                 "error": f"Failed to route MCP request: {str(e)}"
-            })
+            }
+            # Include requestId in error response if present
+            if msg.requestId:
+                error_response["requestId"] = msg.requestId
+            await websocket.send_json(error_response)
     
     async def handle_mcp_response(self, websocket: WebSocket, msg: WebSocketMessage) -> None:
         """Route MCP protocol responses back to requesting clients."""
@@ -908,6 +916,10 @@ class WebSocketManager:
                 "serviceName": msg.serviceName,
                 "mcpPayload": msg.mcpPayload
             }
+            
+            # Include requestId if present (for browser proxy tracking)
+            if msg.requestId:
+                message["requestId"] = msg.requestId
             
             await self._broadcast_to_session(msg.targetClient, message)
             
@@ -935,11 +947,15 @@ class WebSocketManager:
                     result = await response.json()
                     
                     # Send response back to client
-                    await websocket.send_json({
+                    response_message = {
                         "type": "mcp-response",
                         "serviceName": msg.serviceName,
                         "mcpPayload": result
-                    })
+                    }
+                    # Include requestId if present
+                    if msg.requestId:
+                        response_message["requestId"] = msg.requestId
+                    await websocket.send_json(response_message)
                 else:
                     error_text = await response.text()
                     raise Exception(f"External service error: {response.status} - {error_text}")

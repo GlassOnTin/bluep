@@ -105,6 +105,7 @@ class BlueApp:
         self.app.get("/login")(self.login)
         self.app.get("/terminal")(self.terminal)
         self.app.get("/mcp")(self.mcp)
+        self.app.get("/mcp-proxy")(self.mcp_proxy)
         self.app.get("/favicon.png")(self.favicon)
         self.app.websocket("/ws")(self.websocket_endpoint)
         self.app.post("/verify-cert")(self.verify_certificate)
@@ -212,6 +213,26 @@ class BlueApp:
             
         return templates.TemplateResponse(
             "mcp.html",
+            {
+                "request": request,
+                "token": html.escape(session.websocket_token or ""),
+                "session_cookie": html.escape(cookie),
+            }
+        )
+
+    async def mcp_proxy(self, request: Request) -> Response:
+        """Serve the MCP browser proxy page."""
+        # Check authentication
+        cookie = request.cookies.get(self.session_manager.cookie_name)
+        if not cookie:
+            return RedirectResponse(url="/login?redirect=/mcp-proxy", status_code=303)
+            
+        session = self.session_manager.get_session(cookie)
+        if not session:
+            return RedirectResponse(url="/login?redirect=/mcp-proxy", status_code=303)
+            
+        return templates.TemplateResponse(
+            "mcp_proxy.html",
             {
                 "request": request,
                 "token": html.escape(session.websocket_token or ""),

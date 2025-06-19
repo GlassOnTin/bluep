@@ -1,0 +1,9 @@
+{
+  "name": "com.bluep.mcp_bridge",
+  "description": "Bluep MCP Bridge Native Helper",
+  "path": "/usr/local/bin/bluep_mcp_bridge",
+  "type": "stdio",
+  "allowed_origins": [
+    "chrome-extension://YOUR_EXTENSION_ID/"
+  ]
+}

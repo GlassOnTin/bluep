@@ -117,6 +117,7 @@ class WebSocketMessage(BaseModel):
     targetClient: Optional[str] = None  # Target client ID for MCP routing
     serviceUrl: Optional[str] = None  # URL for external MCP service
     description: Optional[str] = None  # Description for external MCP service
+    requestId: Optional[str] = None  # Request ID for browser proxy tracking
 
     @field_validator("data")
     def validate_data(cls, v: Optional[str], info: ValidationInfo) -> str:

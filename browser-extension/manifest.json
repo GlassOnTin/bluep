@@ -1,0 +1,32 @@
+{
+  "manifest_version": 3,
+  "name": "Bluep MCP Bridge",
+  "version": "1.0.0",
+  "description": "Browser-based MCP proxy bridge for bluep",
+  "permissions": [
+    "nativeMessaging",
+    "storage",
+    "tabs"
+  ],
+  "host_permissions": [
+    "https://*/*",
+    "http://localhost/*"
+  ],
+  "background": {
+    "service_worker": "background.js"
+  },
+  "action": {
+    "default_popup": "popup.html",
+    "default_icon": {
+      "16": "icon-16.png",
+      "48": "icon-48.png",
+      "128": "icon-128.png"
+    }
+  },
+  "content_scripts": [
+    {
+      "matches": ["https://*/mcp", "https://*/mcp-proxy"],
+      "js": ["content.js"]
+    }
+  ]
+}
