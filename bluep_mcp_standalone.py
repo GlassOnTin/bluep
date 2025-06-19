@@ -48,21 +48,30 @@ class MCPClientProxy:
     async def connect(self):
         """Connect to bluep WebSocket server."""
         headers = {
-            "Cookie": f"session={self.session_token}",
+            "Cookie": f"bluep_session={self.session_token}",
             "Origin": self.bluep_ws_url.replace("wss://", "https://").replace("ws://", "http://").rsplit("/", 1)[0]
         }
         
-        ssl_context = None
-        if self.bluep_ws_url.startswith("wss://") and not self.verify_ssl:
-            ssl_context = ssl.create_default_context()
-            ssl_context.check_hostname = False
-            ssl_context.verify_mode = ssl.CERT_NONE
-            
-        self.ws_connection = await websockets.connect(
-            self.bluep_ws_url,
-            extra_headers=headers,
-            ssl=ssl_context
-        )
+        # Handle SSL for wss:// URLs
+        if self.bluep_ws_url.startswith("wss://"):
+            if not self.verify_ssl:
+                ssl_context = ssl.create_default_context()
+                ssl_context.check_hostname = False
+                ssl_context.verify_mode = ssl.CERT_NONE
+            else:
+                ssl_context = True  # Use default SSL verification
+                
+            self.ws_connection = await websockets.connect(
+                self.bluep_ws_url,
+                extra_headers=headers,
+                ssl=ssl_context
+            )
+        else:
+            # For ws:// URLs, don't use SSL
+            self.ws_connection = await websockets.connect(
+                self.bluep_ws_url,
+                extra_headers=headers
+            )
         
         logger.info(f"Connected to bluep server")
         asyncio.create_task(self._handle_messages())
@@ -155,8 +164,8 @@ async def main():
                             help='Session token')
     proxy_parser.add_argument('--port', '-p', type=int, default=4000,
                             help='Local port')
-    proxy_parser.add_argument('--no-verify-ssl', action='store_true',
-                            help='Disable SSL verification')
+    proxy_parser.add_argument('--verify-ssl', action='store_true',
+                            help='Enable SSL verification (disabled by default for self-signed certs)')
     
     args = parser.parse_args()
     
@@ -165,7 +174,7 @@ async def main():
         sys.exit(1)
         
     if args.command == 'proxy':
-        proxy = MCPClientProxy(args.server, args.token, verify_ssl=not args.no_verify_ssl)
+        proxy = MCPClientProxy(args.server, args.token, verify_ssl=args.verify_ssl)
         runner = None
         
         try:
