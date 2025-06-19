@@ -335,6 +335,15 @@
                 console.log('WebSocket connected');
                 // Request MCP service list
                 ws.send(JSON.stringify({ type: 'mcp-service-list' }));
+                
+                // Set a timeout in case we don't get a response
+                setTimeout(() => {
+                    if (document.getElementById('main-content').innerHTML.includes('Loading')) {
+                        console.warn('No MCP service list received, rendering empty UI');
+                        services = [];
+                        renderServices();
+                    }
+                }, 2000);
             };
             
             ws.onmessage = (event) => {
@@ -345,6 +354,9 @@
             ws.onerror = (error) => {
                 console.error('WebSocket error:', error);
                 showError('Connection error. Please refresh the page.');
+                // Still try to render the UI
+                services = [];
+                renderServices();
             };
             
             ws.onclose = () => {
@@ -355,8 +367,10 @@
         
         // Handle incoming WebSocket messages
         function handleMessage(msg) {
+            console.log('Received message:', msg.type);
             switch (msg.type) {
                 case 'mcp-service-list':
+                    console.log('Got MCP service list:', msg.mcpServices);
                     services = msg.mcpServices || [];
                     renderServices();
                     break;
@@ -367,6 +381,11 @@
                     showError(msg.error);
                     break;
             }
+        }
+        
+        // Detect platform
+        function isWindows() {
+            return navigator.platform.toLowerCase().includes('win') || navigator.userAgent.toLowerCase().includes('windows');
         }
         
         // Render the main UI
@@ -397,19 +416,32 @@
                         </div>
                         
                         <div class="proxy-guide">
-                            <h3>Option 1: Install MCP Client (Recommended)</h3>
+                            <h3>Option 1: Download Standalone Script (Recommended)</h3>
+                            <p style="font-size: 14px; color: #aaa; margin: 10px 0;">First install dependencies: <code>pip install websockets aiohttp</code></p>
                             <div class="code-block">
-                                pip install bluep-mcp-client
-                                bluep-mcp auth --token ${sessionToken}
-                                bluep-mcp proxy SERVICE_NAME --server wss://${window.location.host}/ws --port 4000
-                                <button class="copy-btn" onclick="copyInstallCommands()">Copy</button>
+                                ${isWindows() ?
+                                    `# PowerShell:
+Invoke-WebRequest -Uri https://raw.githubusercontent.com/glassontin/bluep/main/bluep_mcp_standalone.py -OutFile bluep_mcp_standalone.py
+python bluep_mcp_standalone.py proxy SERVICE_NAME --server wss://${window.location.host}/ws --token ${sessionToken} --port 4000` :
+                                    `wget https://raw.githubusercontent.com/glassontin/bluep/main/bluep_mcp_standalone.py
+python bluep_mcp_standalone.py proxy SERVICE_NAME --server wss://${window.location.host}/ws --token ${sessionToken} --port 4000`
+                                }
+                                <button class="copy-btn" onclick="copyStandaloneCommands()">Copy ${isWindows() ? '(PowerShell)' : '(Bash)'}</button>
                             </div>
                             
-                            <h3>Option 2: Download Standalone Script</h3>
-                            <div class="code-block">
-                                wget https://raw.githubusercontent.com/glassontin/bluep/main/bluep_mcp_standalone.py
-                                python bluep_mcp_standalone.py proxy SERVICE_NAME --server wss://${window.location.host}/ws --token ${sessionToken} --port 4000
-                                <button class="copy-btn" onclick="copyStandaloneCommands()">Copy</button>
+                            <h3>Option 2: Install from PyPI (Coming Soon)</h3>
+                            <div class="code-block" style="opacity: 0.6;">
+                                ${isWindows() ? 
+                                    `# Coming soon to PyPI
+pip install bluep-mcp-client
+bluep-mcp auth --token ${sessionToken}
+bluep-mcp proxy SERVICE_NAME --server wss://${window.location.host}/ws --port 4000` :
+                                    `# Coming soon to PyPI
+pip install bluep-mcp-client
+bluep-mcp auth --token ${sessionToken}
+bluep-mcp proxy SERVICE_NAME --server wss://${window.location.host}/ws --port 4000`
+                                }
+                                <button class="copy-btn" disabled style="cursor: not-allowed;">Not Available Yet</button>
                             </div>
                             
                             <h3>Configure Claude</h3>
@@ -517,16 +549,24 @@
         }
         
         function copyInstallCommands() {
-            const commands = `pip install bluep-mcp-client
-bluep-mcp auth --token ${sessionToken}
-bluep-mcp proxy SERVICE_NAME --server wss://${window.location.host}/ws --port 4000`;
+            // Detect if user is likely on Windows based on user agent
+            const isWindows = navigator.platform.toLowerCase().includes('win') || navigator.userAgent.toLowerCase().includes('windows');
+            const separator = isWindows ? ' ; ' : ' && ';
+            const commands = `pip install bluep-mcp-client${separator}bluep-mcp auth --token ${sessionToken}${separator}bluep-mcp proxy SERVICE_NAME --server wss://${window.location.host}/ws --port 4000`;
             copyToClipboard(commands);
         }
         
         function copyStandaloneCommands() {
-            const commands = `wget https://raw.githubusercontent.com/glassontin/bluep/main/bluep_mcp_standalone.py
-python bluep_mcp_standalone.py proxy SERVICE_NAME --server wss://${window.location.host}/ws --token ${sessionToken} --port 4000`;
-            copyToClipboard(commands);
+            // Detect if user is likely on Windows
+            const isWindows = navigator.platform.toLowerCase().includes('win') || navigator.userAgent.toLowerCase().includes('windows');
+            if (isWindows) {
+                // PowerShell command to install deps and download file
+                const commands = `pip install websockets aiohttp ; Invoke-WebRequest -Uri https://raw.githubusercontent.com/glassontin/bluep/main/bluep_mcp_standalone.py -OutFile bluep_mcp_standalone.py ; python bluep_mcp_standalone.py proxy SERVICE_NAME --server wss://${window.location.host}/ws --token ${sessionToken} --port 4000`;
+                copyToClipboard(commands);
+            } else {
+                const commands = `pip install websockets aiohttp && wget https://raw.githubusercontent.com/glassontin/bluep/main/bluep_mcp_standalone.py && python bluep_mcp_standalone.py proxy SERVICE_NAME --server wss://${window.location.host}/ws --token ${sessionToken} --port 4000`;
+                copyToClipboard(commands);
+            }
         }
         
         function copyClaudeConfig() {

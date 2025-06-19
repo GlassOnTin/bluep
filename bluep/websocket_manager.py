@@ -690,6 +690,7 @@ class WebSocketManager:
     
     async def handle_mcp_service_list(self, websocket: WebSocket) -> None:
         """Handle request to list available MCP services."""
+        logger.info("Handling MCP service list request")
         try:
             # Discover services if not already done
             await self.mcp_service_manager.discover_services()
