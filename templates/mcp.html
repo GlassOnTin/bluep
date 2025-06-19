@@ -418,13 +418,14 @@
                         <div class="proxy-guide">
                             <h3>Option 1: Download Standalone Script (Recommended)</h3>
                             <p style="font-size: 14px; color: #aaa; margin: 10px 0;">First install dependencies: <code>pip install websockets aiohttp</code></p>
+                            <p style="font-size: 13px; color: #8a8; margin: 5px 0;">✓ Works on Windows, macOS, and Linux</p>
                             <div class="code-block">
                                 ${isWindows() ?
                                     `# PowerShell:
-Invoke-WebRequest -Uri https://raw.githubusercontent.com/glassontin/bluep/main/bluep_mcp_standalone.py -OutFile bluep_mcp_standalone.py
-python bluep_mcp_standalone.py proxy SERVICE_NAME --server wss://${window.location.host}/ws --token ${sessionToken} --port 4000` :
-                                    `wget https://raw.githubusercontent.com/glassontin/bluep/main/bluep_mcp_standalone.py
-python bluep_mcp_standalone.py proxy SERVICE_NAME --server wss://${window.location.host}/ws --token ${sessionToken} --port 4000`
+Invoke-WebRequest -Uri https://raw.githubusercontent.com/GlassOnTin/bluep/main/bluep_mcp_aiohttp.py -OutFile bluep_mcp_aiohttp.py
+python bluep_mcp_aiohttp.py proxy SERVICE_NAME --server https://${window.location.host} --token ${sessionToken} --port 4000` :
+                                    `wget https://raw.githubusercontent.com/GlassOnTin/bluep/main/bluep_mcp_aiohttp.py
+python bluep_mcp_aiohttp.py proxy SERVICE_NAME --server https://${window.location.host} --token ${sessionToken} --port 4000`
                                 }
                                 <button class="copy-btn" onclick="copyStandaloneCommands()">Copy ${isWindows() ? '(PowerShell)' : '(Bash)'}</button>
                             </div>
@@ -561,10 +562,10 @@ bluep-mcp proxy SERVICE_NAME --server wss://${window.location.host}/ws --port 40
             const isWindows = navigator.platform.toLowerCase().includes('win') || navigator.userAgent.toLowerCase().includes('windows');
             if (isWindows) {
                 // PowerShell command to install deps and download file
-                const commands = `pip install websockets aiohttp ; Invoke-WebRequest -Uri https://raw.githubusercontent.com/glassontin/bluep/main/bluep_mcp_standalone.py -OutFile bluep_mcp_standalone.py ; python bluep_mcp_standalone.py proxy SERVICE_NAME --server wss://${window.location.host}/ws --token ${sessionToken} --port 4000`;
+                const commands = `pip install websockets aiohttp ; Invoke-WebRequest -Uri https://raw.githubusercontent.com/GlassOnTin/bluep/main/bluep_mcp_aiohttp.py -OutFile bluep_mcp_aiohttp.py ; python bluep_mcp_aiohttp.py proxy SERVICE_NAME --server https://${window.location.host} --token ${sessionToken} --port 4000`;
                 copyToClipboard(commands);
             } else {
-                const commands = `pip install websockets aiohttp && wget https://raw.githubusercontent.com/glassontin/bluep/main/bluep_mcp_standalone.py && python bluep_mcp_standalone.py proxy SERVICE_NAME --server wss://${window.location.host}/ws --token ${sessionToken} --port 4000`;
+                const commands = `pip install websockets aiohttp && wget https://raw.githubusercontent.com/GlassOnTin/bluep/main/bluep_mcp_aiohttp.py && python bluep_mcp_aiohttp.py proxy SERVICE_NAME --server https://${window.location.host} --token ${sessionToken} --port 4000`;
                 copyToClipboard(commands);
             }
         }
