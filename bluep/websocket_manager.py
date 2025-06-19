@@ -104,17 +104,24 @@ class WebSocketManager:
 
     async def connect(self, websocket: WebSocket, token: str) -> None:
         try:
-            logger.debug(f"Checking token {token}")
-            logger.debug(f"Available tokens: {self.session_manager.websocket_tokens}")
+            logger.info(f"WebSocket connection attempt with token {token[:8]}...")
+            logger.debug(f"Available tokens: {list(self.session_manager.websocket_tokens.keys())}")
 
             if token not in self.session_manager.websocket_tokens:
-                logger.error(f"Token {token} not found in valid tokens")
+                logger.error(f"Token {token[:8]}... not found in valid tokens")
                 return
 
             session_id = self.session_manager.websocket_tokens[token]
-            logger.debug(f"Found session_id: {session_id}")
+            logger.info(f"Found session_id: {session_id} for token {token[:8]}...")
+
+            # Check if session is still valid
+            session = self.session_manager.get_session(session_id)
+            if not session:
+                logger.error(f"Session {session_id} not found or expired")
+                return
 
             await websocket.accept()
+            logger.info(f"WebSocket accepted for session {session_id}")
 
             self.active_connections[websocket] = ConnectionInfo(
                 session_id=session_id,
@@ -124,12 +131,13 @@ class WebSocketManager:
 
             # Start keep-alive task
             asyncio.create_task(self._keep_alive(websocket))
+            logger.info(f"Started keep-alive task for session {session_id}")
 
             await self.broadcast_client_count()
             await self.send_current_text(websocket)
 
         except Exception as e:
-            logger.error(f"Connection error: {e}")
+            logger.error(f"Connection error: {e}", exc_info=True)
 
     async def disconnect(self, websocket: WebSocket, reason: str = "unknown") -> None:
         try:
@@ -138,6 +146,7 @@ class WebSocketManager:
                 if websocket in self.active_connections:
                     info = self.active_connections.pop(websocket)
                     session_id = info.session_id
+                    logger.info(f"Disconnecting WebSocket for session {session_id}, reason: {reason}")
                     # Don't remove websocket tokens on disconnect - they should remain valid
                     # for the session lifetime to allow reconnections and page navigation
 
@@ -152,9 +161,12 @@ class WebSocketManager:
             # Don't clean up processes on disconnect - only on explicit termination
             # This allows reconnection to existing processes
             # Processes will be cleaned up by the process manager's monitor
+            
+            if session_id:
+                logger.info(f"WebSocket disconnected for session {session_id}, active connections: {len(self.active_connections)}")
                 
         except Exception as e:
-            logger.error(f"Error in disconnect cleanup: {e}")
+            logger.error(f"Error in disconnect cleanup: {e}", exc_info=True)
 
     async def broadcast(
         self, message: Dict[str, Any], exclude: Optional[WebSocket] = None
@@ -303,6 +315,7 @@ class WebSocketManager:
                     for info in self.active_connections.values()
                     if info.state == ConnectionState.CONNECTED
                 )
+            logger.info(f"Broadcasting client count: {connected_count} active connections")
             # Broadcast without holding lock to prevent deadlocks
             await self.broadcast({"type": "clients", "count": connected_count})
         except Exception as e:
@@ -329,14 +342,17 @@ class WebSocketManager:
             await self.disconnect(websocket, reason="send_error")
 
     async def update_shared_text(self, text: str) -> None:
+        logger.info(f"Updating shared text, length: {len(text)}")
         async with self._lock:
             self.shared_text = text
 
     async def handle_pong(self, websocket: WebSocket) -> None:
         async with self._lock:
             if websocket in self.active_connections:
-                self.active_connections[websocket].pending_pings = 0
-                self.active_connections[websocket].last_active = time.time()
+                info = self.active_connections[websocket]
+                info.pending_pings = 0
+                info.last_active = time.time()
+                logger.debug(f"Received pong from session {info.session_id}, resetting pending_pings")
 
     def _is_valid_transition(
         self, current: Optional[ConnectionState], new: ConnectionState
@@ -368,36 +384,52 @@ class WebSocketManager:
             try:
                 await asyncio.sleep(self.ping_interval)
 
+                # Check connection state and get info while holding lock
+                should_disconnect = False
+                disconnect_reason = ""
+                session_id = None
+                
                 async with self._lock:
                     if websocket not in self.active_connections:
                         break
 
                     info = self.active_connections[websocket]
-
-                    if websocket.application_state != WebSocketState.CONNECTED:
-                        await self.disconnect(websocket, reason="disconnected")
-                        break
+                    session_id = info.session_id
 
                     if info.state != ConnectionState.CONNECTED:
                         break
 
-                    try:
-                        await websocket.send_json({"type": "ping"})
-                        info.last_active = time.time()
+                    # Check if we have too many pending pings BEFORE sending another
+                    if info.pending_pings >= 3:
+                        logger.warning(f"Too many pending pings ({info.pending_pings}) for session {session_id}, disconnecting")
+                        should_disconnect = True
+                        disconnect_reason = "ping_timeout"
+                    else:
+                        # Increment pending pings before sending
                         info.pending_pings += 1
-
-                        if info.pending_pings > 3:
-                            logger.warning(f"Too many pending pings, disconnecting")
-                            await self.disconnect(websocket, reason="ping_timeout")
-                            break
-
-                    except Exception as e:
-                        logger.error(f"Error in keep-alive ping: {e}")
-                        await self.disconnect(websocket, reason="ping_error")
-                        break
+                
+                # Handle disconnection outside of lock
+                if should_disconnect:
+                    await self.disconnect(websocket, reason=disconnect_reason)
+                    break
+                
+                # Check WebSocket state outside of lock
+                if websocket.application_state != WebSocketState.CONNECTED:
+                    logger.info(f"WebSocket not connected for session {session_id}, disconnecting")
+                    await self.disconnect(websocket, reason="disconnected")
+                    break
+                
+                # Send ping outside of lock to avoid blocking
+                try:
+                    await websocket.send_json({"type": "ping"})
+                    logger.debug(f"Sent ping to session {session_id}")
+                except Exception as e:
+                    logger.error(f"Error sending ping to session {session_id}: {e}")
+                    await self.disconnect(websocket, reason="ping_error")
+                    break
 
             except Exception as e:
-                logger.error(f"Error in keep-alive loop: {e}")
+                logger.error(f"Error in keep-alive loop: {e}", exc_info=True)
                 await self.disconnect(websocket, reason="keepalive_error")
                 break
     

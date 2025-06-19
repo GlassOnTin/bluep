@@ -63,11 +63,28 @@ class BlueApp:
         async def startup_task():
             """Start background tasks on startup."""
             asyncio.create_task(self.ws_manager.process_manager.monitor_processes())
+            asyncio.create_task(self._periodic_session_cleanup())
+            logger.info("Background tasks started")
         
         # Schedule startup task
         @self.app.on_event("startup")
         async def startup_event():
             await startup_task()
+
+    async def _periodic_session_cleanup(self) -> None:
+        """Periodically clean up expired sessions."""
+        while True:
+            try:
+                await asyncio.sleep(300)  # Run every 5 minutes
+                logger.debug("Running periodic session cleanup")
+                self.session_manager.cleanup_expired_sessions()
+                
+                # Log current session count
+                active_sessions = len(self.session_manager.sessions)
+                active_connections = len(self.ws_manager.active_connections)
+                logger.info(f"Session cleanup complete. Active sessions: {active_sessions}, WebSocket connections: {active_connections}")
+            except Exception as e:
+                logger.error(f"Error in periodic session cleanup: {e}", exc_info=True)
 
     def _calculate_cert_fingerprint(self) -> None:
         """Calculate SHA-256 fingerprint of the SSL certificate."""
