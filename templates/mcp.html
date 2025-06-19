@@ -465,11 +465,11 @@
 `# First, run your MCP service locally (e.g., on port 5000)
 # Then download and run the reverse proxy:
 Invoke-WebRequest -Uri https://raw.githubusercontent.com/GlassOnTin/bluep/main/bluep_mcp_reverse_proxy.py -OutFile bluep_mcp_reverse_proxy.py
-python bluep_mcp_reverse_proxy.py register SERVICE_NAME --server https://${window.location.host} --token ${sessionToken} --local-port 5000` :
+python bluep_mcp_reverse_proxy.py register SERVICE_NAME --server https://${window.location.host} --token "${sessionToken}" --local-port 5000` :
 `# First, run your MCP service locally (e.g., on port 5000)
 # Then download and run the reverse proxy:
 wget https://raw.githubusercontent.com/GlassOnTin/bluep/main/bluep_mcp_reverse_proxy.py
-python bluep_mcp_reverse_proxy.py register SERVICE_NAME --server https://${window.location.host} --token ${sessionToken} --local-port 5000`
+python bluep_mcp_reverse_proxy.py register SERVICE_NAME --server https://${window.location.host} --token "${sessionToken}" --local-port 5000`
                                 }</pre>
                                 <button class="copy-btn" onclick="copyReverseProxyCommands()">Copy ${isWindows() ? '(PowerShell)' : '(Bash)'}</button>
                             </div>
@@ -481,9 +481,9 @@ python bluep_mcp_reverse_proxy.py register SERVICE_NAME --server https://${windo
                                 <pre>${isWindows() ?
 `# PowerShell:
 Invoke-WebRequest -Uri https://raw.githubusercontent.com/GlassOnTin/bluep/main/bluep_mcp_aiohttp.py -OutFile bluep_mcp_aiohttp.py
-python bluep_mcp_aiohttp.py proxy SERVICE_NAME --server https://${window.location.host} --token ${sessionToken} --port 4000` :
+python bluep_mcp_aiohttp.py proxy SERVICE_NAME --server https://${window.location.host} --token "${sessionToken}" --port 4000` :
 `wget https://raw.githubusercontent.com/GlassOnTin/bluep/main/bluep_mcp_aiohttp.py
-python bluep_mcp_aiohttp.py proxy SERVICE_NAME --server https://${window.location.host} --token ${sessionToken} --port 4000`
+python bluep_mcp_aiohttp.py proxy SERVICE_NAME --server https://${window.location.host} --token "${sessionToken}" --port 4000`
                                 }</pre>
                                 <button class="copy-btn" onclick="copyStandaloneCommands()">Copy ${isWindows() ? '(PowerShell)' : '(Bash)'}</button>
                             </div>
@@ -627,10 +627,10 @@ bluep-mcp proxy SERVICE_NAME --server wss://${window.location.host}/ws --port 40
             const isWindows = navigator.platform.toLowerCase().includes('win') || navigator.userAgent.toLowerCase().includes('windows');
             if (isWindows) {
                 // PowerShell command to install deps and download file
-                const commands = `pip install websockets aiohttp ; Invoke-WebRequest -Uri https://raw.githubusercontent.com/GlassOnTin/bluep/main/bluep_mcp_aiohttp.py -OutFile bluep_mcp_aiohttp.py ; python bluep_mcp_aiohttp.py proxy SERVICE_NAME --server https://${window.location.host} --token ${sessionToken} --port 4000`;
+                const commands = `pip install websockets aiohttp ; Invoke-WebRequest -Uri https://raw.githubusercontent.com/GlassOnTin/bluep/main/bluep_mcp_aiohttp.py -OutFile bluep_mcp_aiohttp.py ; python bluep_mcp_aiohttp.py proxy SERVICE_NAME --server https://${window.location.host} --token "${sessionToken}" --port 4000`;
                 copyToClipboard(commands);
             } else {
-                const commands = `pip install websockets aiohttp && wget https://raw.githubusercontent.com/GlassOnTin/bluep/main/bluep_mcp_aiohttp.py && python bluep_mcp_aiohttp.py proxy SERVICE_NAME --server https://${window.location.host} --token ${sessionToken} --port 4000`;
+                const commands = `pip install websockets aiohttp && wget https://raw.githubusercontent.com/GlassOnTin/bluep/main/bluep_mcp_aiohttp.py && python bluep_mcp_aiohttp.py proxy SERVICE_NAME --server https://${window.location.host} --token "${sessionToken}" --port 4000`;
                 copyToClipboard(commands);
             }
         }
@@ -640,10 +640,10 @@ bluep-mcp proxy SERVICE_NAME --server wss://${window.location.host}/ws --port 40
             const isWindows = navigator.platform.toLowerCase().includes('win') || navigator.userAgent.toLowerCase().includes('windows');
             if (isWindows) {
                 // PowerShell command to install deps and download reverse proxy
-                const commands = `pip install aiohttp ; Invoke-WebRequest -Uri https://raw.githubusercontent.com/GlassOnTin/bluep/main/bluep_mcp_reverse_proxy.py -OutFile bluep_mcp_reverse_proxy.py ; python bluep_mcp_reverse_proxy.py register SERVICE_NAME --server https://${window.location.host} --token ${sessionToken} --local-port 5000`;
+                const commands = `pip install aiohttp ; Invoke-WebRequest -Uri https://raw.githubusercontent.com/GlassOnTin/bluep/main/bluep_mcp_reverse_proxy.py -OutFile bluep_mcp_reverse_proxy.py ; python bluep_mcp_reverse_proxy.py register SERVICE_NAME --server https://${window.location.host} --token "${sessionToken}" --local-port 5000`;
                 copyToClipboard(commands);
             } else {
-                const commands = `pip install aiohttp && wget https://raw.githubusercontent.com/GlassOnTin/bluep/main/bluep_mcp_reverse_proxy.py && python bluep_mcp_reverse_proxy.py register SERVICE_NAME --server https://${window.location.host} --token ${sessionToken} --local-port 5000`;
+                const commands = `pip install aiohttp && wget https://raw.githubusercontent.com/GlassOnTin/bluep/main/bluep_mcp_reverse_proxy.py && python bluep_mcp_reverse_proxy.py register SERVICE_NAME --server https://${window.location.host} --token "${sessionToken}" --local-port 5000`;
                 copyToClipboard(commands);
             }
         }
