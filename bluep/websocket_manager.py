@@ -13,6 +13,7 @@ from .models import ConnectionState, WebSocketMessage
 from .process_manager import ProcessManager
 from .session_manager import SessionManager
 from .mcp_service_manager import MCPServiceManager
+from .external_mcp_registry import ExternalMCPRegistry
 
 logger = logging.getLogger(__name__)
 
@@ -47,9 +48,13 @@ class WebSocketManager:
         mcp_services_dir = Path(__file__).parent.parent / "mcp-services"
         self.mcp_service_manager = MCPServiceManager(mcp_services_dir, self.process_manager)
         
+        # Initialize external MCP registry
+        self.external_mcp_registry = ExternalMCPRegistry()
+        
         # MCP routing information
         self.mcp_service_clients: Dict[str, str] = {}  # service_name -> hosting_session_id
         self.mcp_client_proxies: Dict[str, Dict[str, Any]] = {}  # session_id -> proxy info
+        self.mcp_external_connections: Dict[str, Any] = {}  # service_name -> aiohttp session/websocket
 
     async def transition_state(
         self,
@@ -724,17 +729,35 @@ class WebSocketManager:
         """Handle request to list available MCP services."""
         logger.info("Handling MCP service list request")
         try:
-            # Discover services if not already done
+            # Discover local services
             await self.mcp_service_manager.discover_services()
             
             services = []
+            
+            # Add local services
             for service in self.mcp_service_manager.list_services():
                 services.append({
                     "name": service.name,
                     "status": service.status.value,
                     "port": service.port,
-                    "hostingSession": self.mcp_service_clients.get(service.name)
+                    "hostingSession": self.mcp_service_clients.get(service.name),
+                    "type": "local"
                 })
+            
+            # Add external services
+            for name, ext_service in self.external_mcp_registry.list_services().items():
+                status = "running" if ext_service.active else "stopped"
+                services.append({
+                    "name": name,
+                    "status": status,
+                    "port": None,  # External services don't have local ports
+                    "hostingSession": ext_service.session_id,
+                    "type": "external",
+                    "url": ext_service.url,
+                    "description": ext_service.description
+                })
+            
+            logger.info(f"Returning {len(services)} services (local + external)")
             
             await websocket.send_json({
                 "type": "mcp-service-list",
@@ -825,6 +848,13 @@ class WebSocketManager:
             if not session_id:
                 raise ValueError("No session found")
             
+            # Check if this is an external service
+            ext_service = self.external_mcp_registry.get_service(msg.serviceName)
+            if ext_service:
+                # Route to external service via HTTP
+                await self._route_to_external_mcp(websocket, msg, ext_service)
+                return
+            
             # Find which session is hosting this service
             hosting_session = self.mcp_service_clients.get(msg.serviceName)
             if not hosting_session:
@@ -868,4 +898,85 @@ class WebSocketManager:
                 "type": "error",
                 "error": f"Failed to route MCP response: {str(e)}"
             })
-            self._process_tasks.pop(process_id, None)
+    
+    async def _route_to_external_mcp(self, websocket: WebSocket, msg: WebSocketMessage, ext_service) -> None:
+        """Route MCP request to an external service via HTTP."""
+        try:
+            import aiohttp
+            
+            # Create session if needed
+            if msg.serviceName not in self.mcp_external_connections:
+                self.mcp_external_connections[msg.serviceName] = aiohttp.ClientSession()
+            
+            session = self.mcp_external_connections[msg.serviceName]
+            
+            # Forward the request
+            async with session.post(ext_service.url, json=msg.mcpPayload) as response:
+                if response.status == 200:
+                    result = await response.json()
+                    
+                    # Send response back to client
+                    await websocket.send_json({
+                        "type": "mcp-response",
+                        "serviceName": msg.serviceName,
+                        "mcpPayload": result
+                    })
+                else:
+                    error_text = await response.text()
+                    raise Exception(f"External service error: {response.status} - {error_text}")
+                    
+        except Exception as e:
+            logger.error(f"Error routing to external MCP service: {e}")
+            await websocket.send_json({
+                "type": "error",
+                "error": f"Failed to reach external service: {str(e)}"
+            })
+    
+    async def handle_mcp_service_register(self, websocket: WebSocket, msg: WebSocketMessage) -> None:
+        """Handle registration of an external MCP service."""
+        try:
+            session_id = self._get_session_id_for_websocket(websocket)
+            if not session_id:
+                raise ValueError("No session found")
+            
+            # Extract registration details
+            service_name = msg.serviceName
+            service_url = msg.serviceUrl
+            description = msg.description or ""
+            
+            if not service_name or not service_url:
+                raise ValueError("Service name and URL are required")
+            
+            # Register the external service
+            success = self.external_mcp_registry.register_service(
+                name=service_name,
+                url=service_url,
+                session_id=session_id,
+                description=description
+            )
+            
+            if success:
+                # Notify all clients about the new service
+                await self.broadcast({
+                    "type": "mcp-service-status",
+                    "serviceName": service_name,
+                    "status": "running",
+                    "type": "external",
+                    "url": service_url,
+                    "hostingSession": session_id
+                })
+                
+                await websocket.send_json({
+                    "type": "mcp-service-registered",
+                    "serviceName": service_name,
+                    "success": True
+                })
+            else:
+                raise Exception("Failed to register service")
+                
+        except Exception as e:
+            logger.error(f"Error registering external MCP service: {e}")
+            await websocket.send_json({
+                "type": "error",
+                "error": f"Failed to register external service: {str(e)}"
+            })

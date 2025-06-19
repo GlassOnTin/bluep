@@ -467,15 +467,18 @@ bluep-mcp proxy SERVICE_NAME --server wss://${window.location.host}/ws --port 40
         // Render services list
         function renderServicesList() {
             if (services.length === 0) {
-                return '<p>No MCP services found. Install services in the mcp-services directory.</p>';
+                return '<p>No MCP services found. Install services in the mcp-services directory or register external services.</p>';
             }
             
             return services.map(service => `
                 <div class="service-card">
                     <div class="service-name">${service.name}</div>
                     <span class="service-status status-${service.status}">${service.status}</span>
+                    ${service.type === 'external' ? '<div style="font-size: 12px; color: #3498db;">External Service</div>' : ''}
                     ${service.hostingSession ? `<div style="font-size: 12px; color: #666;">Hosted by: ${service.hostingSession.substring(0, 8)}...</div>` : ''}
                     ${service.port ? `<div style="font-size: 12px; color: #666;">Port: ${service.port}</div>` : ''}
+                    ${service.url ? `<div style="font-size: 12px; color: #666;">URL: ${service.url}</div>` : ''}
+                    ${service.description ? `<div style="font-size: 12px; color: #888; margin-top: 5px;">${service.description}</div>` : ''}
                     <div class="service-actions">
                         ${renderServiceActions(service)}
                     </div>

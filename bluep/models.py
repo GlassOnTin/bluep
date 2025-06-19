@@ -62,6 +62,8 @@ class WebSocketMessage(BaseModel):
         "mcp-service-start",
         "mcp-service-stop",
         "mcp-service-status",
+        "mcp-service-register",
+        "mcp-service-registered",
         "mcp-request",
         "mcp-response",
         "mcp-stream",
@@ -111,6 +113,8 @@ class WebSocketMessage(BaseModel):
     servicePort: Optional[int] = Field(None, ge=1, le=65535)  # MCP service port
     mcpPayload: Optional[Dict[str, Any]] = None  # MCP protocol payload
     targetClient: Optional[str] = None  # Target client ID for MCP routing
+    serviceUrl: Optional[str] = None  # URL for external MCP service
+    description: Optional[str] = None  # Description for external MCP service
 
     @field_validator("data")
     def validate_data(cls, v: Optional[str], info: ValidationInfo) -> str:
