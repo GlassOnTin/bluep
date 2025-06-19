@@ -117,14 +117,23 @@ class MCPServiceDiscovery:
 class MCPReverseProxy:
     """Registers a local MCP service with bluep for reverse proxy access."""
     
-    def __init__(self, bluep_server_url: str, session_cookie: str, verify_ssl: bool = False):
-        self.bluep_ws_url = bluep_server_url.replace("https://", "wss://").replace("http://", "ws://") + "/ws"
+    def __init__(self, bluep_server_url: str, token: str, verify_ssl: bool = False, use_ws_token: bool = False):
         self.bluep_server_url = bluep_server_url
-        self.session_cookie = session_cookie
+        self.token = token
+        self.use_ws_token = use_ws_token
         self.verify_ssl = verify_ssl
         self.ws_connection = None
         self.session = None
         self.registered_services = {}
+        
+        # Construct WebSocket URL based on token type
+        if use_ws_token:
+            # Use token in query parameter for WebSocket auth
+            self.bluep_ws_url = bluep_server_url.replace("https://", "wss://").replace("http://", "ws://") + f"/ws?token={token}"
+        else:
+            # Use session cookie for traditional auth
+            self.bluep_ws_url = bluep_server_url.replace("https://", "wss://").replace("http://", "ws://") + "/ws"
+            self.session_cookie = token
         
     async def connect(self):
         """Connect to bluep WebSocket server."""
@@ -134,12 +143,18 @@ class MCPReverseProxy:
             ssl_context.check_hostname = False
             ssl_context.verify_mode = ssl.CERT_NONE
         
-        cookies = {"bluep_session": self.session_cookie}
         connector = aiohttp.TCPConnector(ssl=ssl_context) if ssl_context else None
-        self.session = aiohttp.ClientSession(
-            cookies=cookies,
-            connector=connector
-        )
+        
+        if self.use_ws_token:
+            # No cookies needed, token is in URL
+            self.session = aiohttp.ClientSession(connector=connector)
+        else:
+            # Use session cookie
+            cookies = {"bluep_session": self.session_cookie}
+            self.session = aiohttp.ClientSession(
+                cookies=cookies,
+                connector=connector
+            )
         
         try:
             logger.info(f"Connecting to {self.bluep_ws_url}")
@@ -297,11 +312,13 @@ async def main():
     auto_parser.add_argument('--server', '-s', default='https://localhost:8500',
                                help='Bluep server URL')
     auto_parser.add_argument('--token', '-t', required=True,
-                               help='Session cookie from bluep')
+                               help='Session cookie or WebSocket token from bluep')
     auto_parser.add_argument('--local-port', '-p', type=int, required=True,
                                help='Local port where MCP service is running')
     auto_parser.add_argument('--verify-ssl', action='store_true',
                                help='Enable SSL verification')
+    auto_parser.add_argument('--ws-token', action='store_true',
+                               help='Use WebSocket token instead of session cookie')
     
     # Register command
     register_parser = subparsers.add_parser('register', help='Register and proxy a local MCP service')
@@ -309,13 +326,15 @@ async def main():
     register_parser.add_argument('--server', '-s', default='https://localhost:8500',
                                help='Bluep server URL')
     register_parser.add_argument('--token', '-t', required=True,
-                               help='Session cookie from bluep')
+                               help='Session cookie or WebSocket token from bluep')
     register_parser.add_argument('--local-port', '-p', type=int, required=True,
                                help='Local port where MCP service is running')
     register_parser.add_argument('--description', '-d', default='',
                                help='Service description')
     register_parser.add_argument('--verify-ssl', action='store_true',
                                help='Enable SSL verification')
+    register_parser.add_argument('--ws-token', action='store_true',
+                               help='Use WebSocket token instead of session cookie')
     
     args = parser.parse_args()
     
@@ -368,7 +387,7 @@ async def main():
                 return
         
         # Register the service
-        proxy = MCPReverseProxy(args.server, args.token, verify_ssl=args.verify_ssl)
+        proxy = MCPReverseProxy(args.server, args.token, verify_ssl=args.verify_ssl, use_ws_token=args.ws_token)
         
         try:
             await proxy.connect()
@@ -394,7 +413,7 @@ async def main():
                             
                             # Reconnect and re-register
                             await proxy.close()
-                            proxy = MCPReverseProxy(args.server, args.token, verify_ssl=args.verify_ssl)
+                            proxy = MCPReverseProxy(args.server, args.token, verify_ssl=args.verify_ssl, use_ws_token=args.ws_token)
                             await proxy.connect()
                             await proxy.register_service(service_name, args.local_port, description)
                             print(f"Reconnected and re-registered service '{service_name}'")
@@ -420,7 +439,7 @@ async def main():
             await proxy.close()
     
     elif args.command == 'register':
-        proxy = MCPReverseProxy(args.server, args.token, verify_ssl=args.verify_ssl)
+        proxy = MCPReverseProxy(args.server, args.token, verify_ssl=args.verify_ssl, use_ws_token=args.ws_token)
         
         try:
             await proxy.connect()
@@ -445,7 +464,7 @@ async def main():
                             
                             # Reconnect and re-register
                             await proxy.close()
-                            proxy = MCPReverseProxy(args.server, args.token, verify_ssl=args.verify_ssl)
+                            proxy = MCPReverseProxy(args.server, args.token, verify_ssl=args.verify_ssl, use_ws_token=args.ws_token)
                             await proxy.connect()
                             await proxy.register_service(args.service, args.local_port, args.description or f"External MCP service on port {args.local_port}")
                             print(f"Reconnected and re-registered service '{args.service}'")

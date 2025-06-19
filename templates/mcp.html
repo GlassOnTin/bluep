@@ -452,8 +452,12 @@
                     <div class="section">
                         <h2>Client Setup Options</h2>
                         <div class="session-info">
-                            Your session token: <span class="session-token">${sessionToken}</span>
-                            <button class="copy-btn" onclick="copyToClipboard('${sessionToken}')">Copy</button>
+                            <p style="font-size: 13px; color: #8f8; margin: 5px 0;">✓ You can now use the WebSocket token directly!</p>
+                            <p style="font-size: 12px; color: #aaa; margin: 5px 0;">Just add --ws-token flag to use this token instead of the session cookie</p>
+                            <div style="margin-top: 10px;">
+                                Your token: <span class="session-token">${sessionToken}</span>
+                                <button class="copy-btn" onclick="copyToClipboard('${sessionToken}')">Copy</button>
+                            </div>
                         </div>
                         
                         <div class="proxy-guide">
@@ -461,23 +465,46 @@
                             <p style="font-size: 14px; color: #aaa; margin: 10px 0;">For services that must run on your local machine (e.g., Azure DevOps with Windows auth)</p>
                             <p style="font-size: 13px; color: #8a8; margin: 5px 0;">✓ Run MCP services behind firewalls</p>
                             <p style="font-size: 13px; color: #8a8; margin: 5px 0;">✓ Perfect for services requiring local authentication</p>
+                            <p style="font-size: 13px; color: #8a8; margin: 5px 0;">✓ Auto-discovery of MCP services</p>
+                            
+                            <h4 style="margin-top: 15px; font-size: 14px;">Method A: Auto-discover and register</h4>
                             <div class="code-block">
                                 <pre>${isWindows() ?
-`# First, run your MCP service locally (e.g., on port 5000)
-# Then download and run the reverse proxy:
+`# Download the reverse proxy script
 Invoke-WebRequest -Uri https://raw.githubusercontent.com/GlassOnTin/bluep/main/bluep_mcp_reverse_proxy.py -OutFile bluep_mcp_reverse_proxy.py
-python bluep_mcp_reverse_proxy.py register SERVICE_NAME --server https://${window.location.host} --token "${sessionToken}" --local-port 5000` :
-`# First, run your MCP service locally (e.g., on port 5000)
-# Then download and run the reverse proxy:
+
+# First, discover what's running on your port
+python bluep_mcp_reverse_proxy.py discover --port 5000
+
+# Then auto-register the discovered service (using WebSocket token)
+python bluep_mcp_reverse_proxy.py auto --server https://${window.location.host} --token "${sessionToken}" --local-port 5000 --ws-token` :
+`# Download the reverse proxy script
 wget https://raw.githubusercontent.com/GlassOnTin/bluep/main/bluep_mcp_reverse_proxy.py
-python bluep_mcp_reverse_proxy.py register SERVICE_NAME --server https://${window.location.host} --token "${sessionToken}" --local-port 5000`
+
+# First, discover what's running on your port
+python bluep_mcp_reverse_proxy.py discover --port 5000
+
+# Then auto-register the discovered service (using WebSocket token)
+python bluep_mcp_reverse_proxy.py auto --server https://${window.location.host} --token "${sessionToken}" --local-port 5000 --ws-token`
                                 }</pre>
-                                <button class="copy-btn" onclick="copyReverseProxyCommands()">Copy ${isWindows() ? '(PowerShell)' : '(Bash)'}</button>
+                                <button class="copy-btn" onclick="copyAutoReverseProxyCommands()">Copy Auto Commands ${isWindows() ? '(PowerShell)' : '(Bash)'}</button>
+                            </div>
+                            
+                            <h4 style="margin-top: 15px; font-size: 14px;">Method B: Manual registration (if you know the service name)</h4>
+                            <div class="code-block">
+                                <pre>${isWindows() ?
+`# Register with a specific name (e.g., 'devops' for Azure DevOps)
+python bluep_mcp_reverse_proxy.py register devops --server https://${window.location.host} --token "${sessionToken}" --local-port 5000 --ws-token` :
+`# Register with a specific name (e.g., 'devops' for Azure DevOps)
+python bluep_mcp_reverse_proxy.py register devops --server https://${window.location.host} --token "${sessionToken}" --local-port 5000 --ws-token`
+                                }</pre>
+                                <button class="copy-btn" onclick="copyReverseProxyCommands()">Copy Manual Command</button>
                             </div>
                             
                             <h3>Option 2: Access Remote MCP Services (Forward Proxy)</h3>
                             <p style="font-size: 14px; color: #aaa; margin: 10px 0;">For accessing MCP services already running on this bluep server</p>
                             <p style="font-size: 13px; color: #8a8; margin: 5px 0;">✓ Access server-hosted MCP services from your local machine</p>
+                            <p style="font-size: 13px; color: #88f; margin: 5px 0;">➜ New: Try the <a href="/mcp-proxy" style="color: #88f;">Browser-Based Proxy</a> (experimental)</p>
                             <div class="code-block">
                                 <pre>${isWindows() ?
 `# PowerShell:
@@ -636,15 +663,28 @@ bluep-mcp proxy SERVICE_NAME --server wss://${window.location.host}/ws --port 40
             }
         }
         
+        function copyAutoReverseProxyCommands() {
+            // Detect if user is likely on Windows
+            const isWindows = navigator.platform.toLowerCase().includes('win') || navigator.userAgent.toLowerCase().includes('windows');
+            if (isWindows) {
+                // PowerShell commands for auto discovery
+                const commands = `pip install aiohttp ; Invoke-WebRequest -Uri https://raw.githubusercontent.com/GlassOnTin/bluep/main/bluep_mcp_reverse_proxy.py -OutFile bluep_mcp_reverse_proxy.py ; python bluep_mcp_reverse_proxy.py discover --port 5000 ; python bluep_mcp_reverse_proxy.py auto --server https://${window.location.host} --token "${sessionToken}" --local-port 5000 --ws-token`;
+                copyToClipboard(commands);
+            } else {
+                const commands = `pip install aiohttp && wget https://raw.githubusercontent.com/GlassOnTin/bluep/main/bluep_mcp_reverse_proxy.py && python bluep_mcp_reverse_proxy.py discover --port 5000 && python bluep_mcp_reverse_proxy.py auto --server https://${window.location.host} --token "${sessionToken}" --local-port 5000 --ws-token`;
+                copyToClipboard(commands);
+            }
+        }
+        
         function copyReverseProxyCommands() {
             // Detect if user is likely on Windows
             const isWindows = navigator.platform.toLowerCase().includes('win') || navigator.userAgent.toLowerCase().includes('windows');
             if (isWindows) {
-                // PowerShell command to install deps and download reverse proxy
-                const commands = `pip install aiohttp ; Invoke-WebRequest -Uri https://raw.githubusercontent.com/GlassOnTin/bluep/main/bluep_mcp_reverse_proxy.py -OutFile bluep_mcp_reverse_proxy.py ; python bluep_mcp_reverse_proxy.py register SERVICE_NAME --server https://${window.location.host} --token "${sessionToken}" --local-port 5000`;
+                // PowerShell command for manual registration
+                const commands = `python bluep_mcp_reverse_proxy.py register devops --server https://${window.location.host} --token "${sessionToken}" --local-port 5000 --ws-token`;
                 copyToClipboard(commands);
             } else {
-                const commands = `pip install aiohttp && wget https://raw.githubusercontent.com/GlassOnTin/bluep/main/bluep_mcp_reverse_proxy.py && python bluep_mcp_reverse_proxy.py register SERVICE_NAME --server https://${window.location.host} --token "${sessionToken}" --local-port 5000`;
+                const commands = `python bluep_mcp_reverse_proxy.py register devops --server https://${window.location.host} --token "${sessionToken}" --local-port 5000 --ws-token`;
                 copyToClipboard(commands);
             }
         }
