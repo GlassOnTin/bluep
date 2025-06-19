@@ -90,7 +90,7 @@ class MCPReverseProxy:
                         
                         if msg_type == "ping":
                             await self.ws_connection.send_json({"type": "pong"})
-                            logger.debug("Received ping, sent pong")
+                            logger.info("Received ping, sent pong")
                         
                         elif msg_type == "mcp-request":
                             # Handle incoming MCP request
@@ -180,10 +180,11 @@ class MCPReverseProxy:
         """Send periodic ping to keep connection alive."""
         try:
             while self.ws_connection and not self.ws_connection.closed:
-                await asyncio.sleep(30)  # Send ping every 30 seconds
+                await asyncio.sleep(15)  # Send ping every 15 seconds (more frequent than server's 20s)
                 if not self.ws_connection.closed:
-                    await self.ws_connection.ping()
-                    logger.debug("Sent ping to keep connection alive")
+                    # Send our own pong message proactively
+                    await self.ws_connection.send_json({"type": "pong"})
+                    logger.info("Sent proactive pong to keep connection alive")
         except Exception as e:
             logger.error(f"Error in periodic ping: {e}")
     
@@ -235,21 +236,28 @@ async def main():
             
             # Keep running with automatic reconnection
             reconnect_delay = 5
+            last_check = 0
             while True:
                 try:
-                    if proxy.ws_connection.closed:
-                        print(f"Connection lost. Reconnecting in {reconnect_delay} seconds...")
-                        await asyncio.sleep(reconnect_delay)
-                        
-                        # Reconnect and re-register
-                        await proxy.close()
-                        proxy = MCPReverseProxy(args.server, args.token, verify_ssl=args.verify_ssl)
-                        await proxy.connect()
-                        await proxy.register_service(args.service, args.local_port, args.description)
-                        print(f"Reconnected and re-registered service '{args.service}'")
-                        reconnect_delay = 5  # Reset delay on successful reconnection
+                    # Check connection status more frequently
+                    current_time = asyncio.get_event_loop().time()
+                    if current_time - last_check > 1:  # Check every second
+                        last_check = current_time
+                        if proxy.ws_connection.closed:
+                            print(f"Connection lost. Reconnecting in {reconnect_delay} seconds...")
+                            await asyncio.sleep(reconnect_delay)
+                            
+                            # Reconnect and re-register
+                            await proxy.close()
+                            proxy = MCPReverseProxy(args.server, args.token, verify_ssl=args.verify_ssl)
+                            await proxy.connect()
+                            await proxy.register_service(args.service, args.local_port, args.description or f"External MCP service on port {args.local_port}")
+                            print(f"Reconnected and re-registered service '{args.service}'")
+                            reconnect_delay = 5  # Reset delay on successful reconnection
+                        else:
+                            await asyncio.sleep(0.1)
                     else:
-                        await asyncio.sleep(1)
+                        await asyncio.sleep(0.1)
                 except Exception as e:
                     logger.error(f"Error in main loop: {e}")
                     reconnect_delay = min(reconnect_delay * 2, 60)  # Exponential backoff up to 60 seconds
