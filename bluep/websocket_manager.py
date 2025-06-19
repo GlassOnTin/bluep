@@ -961,9 +961,10 @@ class WebSocketManager:
                     "type": "mcp-service-status",
                     "serviceName": service_name,
                     "status": "running",
-                    "type": "external",
+                    "serviceType": "external",
                     "url": service_url,
-                    "hostingSession": session_id
+                    "hostingSession": session_id,
+                    "description": description
                 })
                 
                 await websocket.send_json({

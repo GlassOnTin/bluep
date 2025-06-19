@@ -1,0 +1,9 @@
+{
+  "mcp_azure_devops": {
+    "name": "mcp_azure_devops",
+    "url": "http://localhost:5000",
+    "session_id": "tDHzcS7rwSEqLfHSQ1QwkW3x5f0KRodjS9JX5mwup4s",
+    "description": "External MCP service on port 5000",
+    "active": true
+  }
+}

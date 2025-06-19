@@ -386,7 +386,31 @@
                     renderServices();
                     break;
                 case 'mcp-service-status':
-                    updateServiceStatus(msg.serviceName, msg.status, msg.port, msg.hostingSession);
+                    // Handle both regular status updates and external service registrations
+                    if (msg.serviceType === 'external') {
+                        // Add or update external service
+                        const existingService = services.find(s => s.name === msg.serviceName);
+                        if (!existingService) {
+                            services.push({
+                                name: msg.serviceName,
+                                status: msg.status,
+                                type: 'external',
+                                url: msg.url,
+                                hostingSession: msg.hostingSession,
+                                description: msg.description
+                            });
+                            renderServices();
+                        } else {
+                            updateServiceStatus(msg.serviceName, msg.status, msg.port, msg.hostingSession, 'external', msg.url, msg.description);
+                        }
+                    } else {
+                        updateServiceStatus(msg.serviceName, msg.status, msg.port, msg.hostingSession);
+                    }
+                    break;
+                case 'mcp-service-registered':
+                    // Service was successfully registered, request fresh list
+                    ws.send(JSON.stringify({ type: 'mcp-service-list' }));
+                    showSuccess(`Service '${msg.serviceName}' registered successfully`);
                     break;
                 case 'error':
                     showError(msg.error);
@@ -550,12 +574,15 @@ bluep-mcp proxy SERVICE_NAME --server wss://${window.location.host}/ws --port 40
         }
         
         // Update service status
-        function updateServiceStatus(serviceName, status, port, hostingSession) {
+        function updateServiceStatus(serviceName, status, port, hostingSession, serviceType, url, description) {
             const service = services.find(s => s.name === serviceName);
             if (service) {
                 service.status = status;
-                service.port = port;
-                service.hostingSession = hostingSession;
+                if (port !== undefined) service.port = port;
+                if (hostingSession !== undefined) service.hostingSession = hostingSession;
+                if (serviceType !== undefined) service.type = serviceType;
+                if (url !== undefined) service.url = url;
+                if (description !== undefined) service.description = description;
                 renderServices();
             }
         }
