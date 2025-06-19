@@ -409,16 +409,34 @@
                 
                 <div id="client-tab" class="tab-content">
                     <div class="section">
-                        <h2>Connect from Another Client</h2>
+                        <h2>Client Setup Options</h2>
                         <div class="session-info">
                             Your session token: <span class="session-token">${sessionToken}</span>
                             <button class="copy-btn" onclick="copyToClipboard('${sessionToken}')">Copy</button>
                         </div>
                         
                         <div class="proxy-guide">
-                            <h3>Option 1: Download Standalone Script (Recommended)</h3>
-                            <p style="font-size: 14px; color: #aaa; margin: 10px 0;">First install dependencies: <code>pip install websockets aiohttp</code></p>
-                            <p style="font-size: 13px; color: #8a8; margin: 5px 0;">✓ Works on Windows, macOS, and Linux</p>
+                            <h3>Option 1: Register External MCP Service (Reverse Proxy)</h3>
+                            <p style="font-size: 14px; color: #aaa; margin: 10px 0;">For services that must run on your local machine (e.g., Azure DevOps with Windows auth)</p>
+                            <p style="font-size: 13px; color: #8a8; margin: 5px 0;">✓ Run MCP services behind firewalls</p>
+                            <p style="font-size: 13px; color: #8a8; margin: 5px 0;">✓ Perfect for services requiring local authentication</p>
+                            <div class="code-block">
+                                ${isWindows() ?
+                                    `# First, run your MCP service locally (e.g., on port 5000)
+# Then download and run the reverse proxy:
+Invoke-WebRequest -Uri https://raw.githubusercontent.com/GlassOnTin/bluep/main/bluep_mcp_reverse_proxy.py -OutFile bluep_mcp_reverse_proxy.py
+python bluep_mcp_reverse_proxy.py register SERVICE_NAME --server https://${window.location.host} --token ${sessionToken} --local-port 5000` :
+                                    `# First, run your MCP service locally (e.g., on port 5000)
+# Then download and run the reverse proxy:
+wget https://raw.githubusercontent.com/GlassOnTin/bluep/main/bluep_mcp_reverse_proxy.py
+python bluep_mcp_reverse_proxy.py register SERVICE_NAME --server https://${window.location.host} --token ${sessionToken} --local-port 5000`
+                                }
+                                <button class="copy-btn" onclick="copyReverseProxyCommands()">Copy ${isWindows() ? '(PowerShell)' : '(Bash)'}</button>
+                            </div>
+                            
+                            <h3>Option 2: Access Remote MCP Services (Forward Proxy)</h3>
+                            <p style="font-size: 14px; color: #aaa; margin: 10px 0;">For accessing MCP services already running on this bluep server</p>
+                            <p style="font-size: 13px; color: #8a8; margin: 5px 0;">✓ Access server-hosted MCP services from your local machine</p>
                             <div class="code-block">
                                 ${isWindows() ?
                                     `# PowerShell:
@@ -430,7 +448,7 @@ python bluep_mcp_aiohttp.py proxy SERVICE_NAME --server https://${window.locatio
                                 <button class="copy-btn" onclick="copyStandaloneCommands()">Copy ${isWindows() ? '(PowerShell)' : '(Bash)'}</button>
                             </div>
                             
-                            <h3>Option 2: Install from PyPI (Coming Soon)</h3>
+                            <h3>Option 3: Install from PyPI (Coming Soon)</h3>
                             <div class="code-block" style="opacity: 0.6;">
                                 ${isWindows() ? 
                                     `# Coming soon to PyPI
@@ -445,14 +463,15 @@ bluep-mcp proxy SERVICE_NAME --server wss://${window.location.host}/ws --port 40
                                 <button class="copy-btn" disabled style="cursor: not-allowed;">Not Available Yet</button>
                             </div>
                             
-                            <h3>Configure Claude</h3>
-                            <p>Once the proxy is running, add this to your Claude MCP configuration:</p>
+                            <h3>Configure Your MCP Client</h3>
+                            <p style="font-size: 14px; color: #aaa;">For external services (Option 1), they're accessible directly through bluep - no local proxy needed!</p>
+                            <p style="font-size: 14px; color: #aaa;">For remote services (Option 2), configure your MCP client to use the local proxy:</p>
                             <div class="code-block">
 {
   "mcpServers": {
     "SERVICE_NAME": {
-      "command": "curl",
-      "args": ["-X", "POST", "http://localhost:4000"]
+      "command": "node",
+      "args": ["/path/to/mcp-client.js", "http://localhost:4000"]
     }
   }
 }
@@ -569,6 +588,19 @@ bluep-mcp proxy SERVICE_NAME --server wss://${window.location.host}/ws --port 40
                 copyToClipboard(commands);
             } else {
                 const commands = `pip install websockets aiohttp && wget https://raw.githubusercontent.com/GlassOnTin/bluep/main/bluep_mcp_aiohttp.py && python bluep_mcp_aiohttp.py proxy SERVICE_NAME --server https://${window.location.host} --token ${sessionToken} --port 4000`;
+                copyToClipboard(commands);
+            }
+        }
+        
+        function copyReverseProxyCommands() {
+            // Detect if user is likely on Windows
+            const isWindows = navigator.platform.toLowerCase().includes('win') || navigator.userAgent.toLowerCase().includes('windows');
+            if (isWindows) {
+                // PowerShell command to install deps and download reverse proxy
+                const commands = `pip install aiohttp ; Invoke-WebRequest -Uri https://raw.githubusercontent.com/GlassOnTin/bluep/main/bluep_mcp_reverse_proxy.py -OutFile bluep_mcp_reverse_proxy.py ; python bluep_mcp_reverse_proxy.py register SERVICE_NAME --server https://${window.location.host} --token ${sessionToken} --local-port 5000`;
+                copyToClipboard(commands);
+            } else {
+                const commands = `pip install aiohttp && wget https://raw.githubusercontent.com/GlassOnTin/bluep/main/bluep_mcp_reverse_proxy.py && python bluep_mcp_reverse_proxy.py register SERVICE_NAME --server https://${window.location.host} --token ${sessionToken} --local-port 5000`;
                 copyToClipboard(commands);
             }
         }
