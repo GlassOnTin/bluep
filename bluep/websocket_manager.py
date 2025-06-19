@@ -170,6 +170,25 @@ class WebSocketManager:
             if session_id:
                 logger.info(f"WebSocket disconnected for session {session_id}, active connections: {len(self.active_connections)}")
                 
+                # Check if this session was hosting any external MCP services
+                services_to_remove = []
+                for name, service in self.external_mcp_registry.list_services().items():
+                    if service.session_id == session_id:
+                        services_to_remove.append(name)
+                
+                # Remove external services registered by this session
+                for service_name in services_to_remove:
+                    logger.info(f"Removing external service '{service_name}' due to session disconnect")
+                    self.external_mcp_registry.unregister_service(service_name)
+                    
+                    # Notify all clients about service removal
+                    await self.broadcast({
+                        "type": "mcp-service-status",
+                        "serviceName": service_name,
+                        "status": "stopped",
+                        "serviceType": "external"
+                    })
+                
         except Exception as e:
             logger.error(f"Error in disconnect cleanup: {e}", exc_info=True)
 
@@ -980,4 +999,50 @@ class WebSocketManager:
             await websocket.send_json({
                 "type": "error",
                 "error": f"Failed to register external service: {str(e)}"
+            })
+    
+    async def handle_mcp_service_unregister(self, websocket: WebSocket, msg: WebSocketMessage) -> None:
+        """Handle unregistration of an external MCP service."""
+        try:
+            session_id = self._get_session_id_for_websocket(websocket)
+            if not session_id:
+                raise ValueError("No session found")
+            
+            service_name = msg.serviceName
+            if not service_name:
+                raise ValueError("Service name is required")
+            
+            # Check if service exists and belongs to this session
+            service = self.external_mcp_registry.get_service(service_name)
+            if not service:
+                raise ValueError(f"Service '{service_name}' not found")
+            
+            if service.session_id != session_id:
+                raise ValueError("You can only unregister services you registered")
+            
+            # Unregister the service
+            success = self.external_mcp_registry.unregister_service(service_name)
+            
+            if success:
+                # Notify all clients about service removal
+                await self.broadcast({
+                    "type": "mcp-service-status",
+                    "serviceName": service_name,
+                    "status": "stopped",
+                    "serviceType": "external"
+                })
+                
+                await websocket.send_json({
+                    "type": "mcp-service-unregistered",
+                    "serviceName": service_name,
+                    "success": True
+                })
+            else:
+                raise Exception("Failed to unregister service")
+                
+        except Exception as e:
+            logger.error(f"Error unregistering external MCP service: {e}")
+            await websocket.send_json({
+                "type": "error",
+                "error": f"Failed to unregister service: {str(e)}"
             })

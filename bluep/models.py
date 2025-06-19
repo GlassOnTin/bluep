@@ -64,6 +64,8 @@ class WebSocketMessage(BaseModel):
         "mcp-service-status",
         "mcp-service-register",
         "mcp-service-registered",
+        "mcp-service-unregister",
+        "mcp-service-unregistered",
         "mcp-request",
         "mcp-response",
         "mcp-stream",

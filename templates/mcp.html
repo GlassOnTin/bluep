@@ -386,8 +386,13 @@
                     renderServices();
                     break;
                 case 'mcp-service-status':
-                    // Handle both regular status updates and external service registrations
-                    if (msg.serviceType === 'external') {
+                    // Handle service status updates
+                    if (msg.status === 'stopped' && msg.serviceType === 'external') {
+                        // Remove stopped external service
+                        services = services.filter(s => s.name !== msg.serviceName);
+                        renderServices();
+                        showSuccess(`Service '${msg.serviceName}' has been removed`);
+                    } else if (msg.serviceType === 'external') {
                         // Add or update external service
                         const existingService = services.find(s => s.name === msg.serviceName);
                         if (!existingService) {

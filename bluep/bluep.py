@@ -517,6 +517,10 @@ class BlueApp:
                 elif msg.type == "mcp-service-register":
                     # Handle external MCP service registration
                     await self.ws_manager.handle_mcp_service_register(websocket, msg)
+                    
+                elif msg.type == "mcp-service-unregister":
+                    # Handle external MCP service unregistration
+                    await self.ws_manager.handle_mcp_service_unregister(websocket, msg)
 
         except WebSocketDisconnect:
             logger.info("WebSocket disconnected normally")
