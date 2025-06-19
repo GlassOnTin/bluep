@@ -169,3 +169,6 @@ all.txt
 mcp-services/
 !mcp-services/.gitkeep
 !mcp-services/README.md
+
+# External MCP services registry
+external_mcp_services.json

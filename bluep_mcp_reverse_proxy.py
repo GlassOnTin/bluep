@@ -70,6 +70,9 @@ class MCPReverseProxy:
             # Start message handler
             asyncio.create_task(self._handle_messages())
             
+            # Start periodic ping to keep connection alive
+            asyncio.create_task(self._send_periodic_ping())
+            
         except Exception as e:
             logger.error(f"Connection failed: {e}")
             if self.session:
@@ -173,6 +176,17 @@ class MCPReverseProxy:
         
         logger.info(f"Registering service '{service_name}' at {local_url}")
     
+    async def _send_periodic_ping(self):
+        """Send periodic ping to keep connection alive."""
+        try:
+            while self.ws_connection and not self.ws_connection.closed:
+                await asyncio.sleep(30)  # Send ping every 30 seconds
+                if not self.ws_connection.closed:
+                    await self.ws_connection.ping()
+                    logger.debug("Sent ping to keep connection alive")
+        except Exception as e:
+            logger.error(f"Error in periodic ping: {e}")
+    
     async def close(self):
         """Close connections."""
         if self.ws_connection:
@@ -219,11 +233,28 @@ async def main():
             print("The service is now accessible through bluep")
             print("Press Ctrl+C to stop")
             
-            # Keep running
-            while not proxy.ws_connection.closed:
-                await asyncio.sleep(1)
-            
-            print("Connection lost. Exiting...")
+            # Keep running with automatic reconnection
+            reconnect_delay = 5
+            while True:
+                try:
+                    if proxy.ws_connection.closed:
+                        print(f"Connection lost. Reconnecting in {reconnect_delay} seconds...")
+                        await asyncio.sleep(reconnect_delay)
+                        
+                        # Reconnect and re-register
+                        await proxy.close()
+                        proxy = MCPReverseProxy(args.server, args.token, verify_ssl=args.verify_ssl)
+                        await proxy.connect()
+                        await proxy.register_service(args.service, args.local_port, args.description)
+                        print(f"Reconnected and re-registered service '{args.service}'")
+                        reconnect_delay = 5  # Reset delay on successful reconnection
+                    else:
+                        await asyncio.sleep(1)
+                except Exception as e:
+                    logger.error(f"Error in main loop: {e}")
+                    reconnect_delay = min(reconnect_delay * 2, 60)  # Exponential backoff up to 60 seconds
+                    print(f"Error occurred. Retrying in {reconnect_delay} seconds...")
+                    await asyncio.sleep(reconnect_delay)
             
         except KeyboardInterrupt:
             print("\nShutting down...")

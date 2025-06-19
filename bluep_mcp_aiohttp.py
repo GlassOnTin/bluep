@@ -208,11 +208,31 @@ async def main():
             print(f"Proxying MCP service '{args.service}' on port {args.port}")
             print("Press Ctrl+C to stop")
             
-            # Keep alive
-            while not proxy.ws_connection.closed:
-                await asyncio.sleep(1)
-            
-            print("Connection lost. Exiting...")
+            # Keep alive with automatic reconnection
+            reconnect_delay = 5
+            while True:
+                try:
+                    if proxy.ws_connection.closed:
+                        print(f"Connection lost. Reconnecting in {reconnect_delay} seconds...")
+                        await asyncio.sleep(reconnect_delay)
+                        
+                        # Clean up and reconnect
+                        if runner:
+                            await runner.cleanup()
+                        await proxy.close()
+                        
+                        proxy = MCPClientProxy(args.server, args.token, verify_ssl=args.verify_ssl)
+                        await proxy.connect()
+                        runner = await proxy.start_http_proxy(args.service, args.port)
+                        print(f"Reconnected and proxy restarted on port {args.port}")
+                        reconnect_delay = 5  # Reset delay
+                    else:
+                        await asyncio.sleep(1)
+                except Exception as e:
+                    logger.error(f"Error in main loop: {e}")
+                    reconnect_delay = min(reconnect_delay * 2, 60)  # Exponential backoff
+                    print(f"Error occurred. Retrying in {reconnect_delay} seconds...")
+                    await asyncio.sleep(reconnect_delay)
             
         except KeyboardInterrupt:
             print("\nShutting down...")
