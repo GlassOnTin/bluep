@@ -466,6 +466,7 @@
                             <p style="font-size: 13px; color: #8a8; margin: 5px 0;">✓ Run MCP services behind firewalls</p>
                             <p style="font-size: 13px; color: #8a8; margin: 5px 0;">✓ Perfect for services requiring local authentication</p>
                             <p style="font-size: 13px; color: #8a8; margin: 5px 0;">✓ Auto-discovery of MCP services</p>
+                            <p style="font-size: 13px; color: #8a8; margin: 5px 0;">✓ Support for stdio-based MCP services (e.g., npx packages)</p>
                             
                             <h4 style="margin-top: 15px; font-size: 14px;">Method A: Auto-discover and register</h4>
                             <div class="code-block">
@@ -500,6 +501,39 @@ python bluep_mcp_reverse_proxy.py register devops --server https://${window.loca
                                 }</pre>
                                 <button class="copy-btn" onclick="copyReverseProxyCommands()">Copy Manual Command</button>
                             </div>
+                            
+                            <h4 style="margin-top: 15px; font-size: 14px;">Method C: For stdio-based MCP services (e.g., npx packages)</h4>
+                            <p style="font-size: 12px; color: #fa8; margin: 5px 0;">⚠️ Many MCP services use stdio instead of HTTP. Use the bridge for these:</p>
+                            <div class="code-block">
+                                <pre>${isWindows() ?
+`# Step 1: Download the stdio bridge
+Invoke-WebRequest -Uri https://raw.githubusercontent.com/GlassOnTin/bluep/main/bluep_mcp_stdio_bridge.py -OutFile bluep_mcp_stdio_bridge.py
+
+# Step 2: Start the bridge (example with Azure DevOps MCP)
+# Terminal 1:
+python bluep_mcp_stdio_bridge.py --port 5000 --command "npx -y @tiberriver256/mcp-server-azure-devops"
+
+# Step 3: Register with bluep (in Terminal 2)
+python bluep_mcp_reverse_proxy.py register azure-devops --server https://${window.location.host} --token "${sessionToken}" --local-port 5000 --ws-token` :
+`# Step 1: Download the stdio bridge
+wget https://raw.githubusercontent.com/GlassOnTin/bluep/main/bluep_mcp_stdio_bridge.py
+
+# Step 2: Start the bridge (example with Azure DevOps MCP)
+# Terminal 1:
+python bluep_mcp_stdio_bridge.py --port 5000 --command "npx -y @tiberriver256/mcp-server-azure-devops"
+
+# Step 3: Register with bluep (in Terminal 2)
+python bluep_mcp_reverse_proxy.py register azure-devops --server https://${window.location.host} --token "${sessionToken}" --local-port 5000 --ws-token`
+                                }</pre>
+                                <button class="copy-btn" onclick="copyStdioBridgeCommands()">Copy Stdio Bridge Commands</button>
+                            </div>
+                            <p style="font-size: 12px; color: #aaa; margin: 10px 0;">Common stdio-based MCP services:</p>
+                            <ul style="font-size: 12px; color: #888; margin-left: 20px;">
+                                <li>@tiberriver256/mcp-server-azure-devops</li>
+                                <li>@modelcontextprotocol/server-filesystem</li>
+                                <li>@modelcontextprotocol/server-github</li>
+                                <li>Most npx-installable MCP services</li>
+                            </ul>
                             
                             <h3>Option 2: Access Remote MCP Services (Forward Proxy)</h3>
                             <p style="font-size: 14px; color: #aaa; margin: 10px 0;">For accessing MCP services already running on this bluep server</p>
@@ -685,6 +719,19 @@ bluep-mcp proxy SERVICE_NAME --server wss://${window.location.host}/ws --port 40
                 copyToClipboard(commands);
             } else {
                 const commands = `python bluep_mcp_reverse_proxy.py register devops --server https://${window.location.host} --token "${sessionToken}" --local-port 5000 --ws-token`;
+                copyToClipboard(commands);
+            }
+        }
+        
+        function copyStdioBridgeCommands() {
+            // Detect if user is likely on Windows
+            const isWindows = navigator.platform.toLowerCase().includes('win') || navigator.userAgent.toLowerCase().includes('windows');
+            if (isWindows) {
+                // PowerShell commands for stdio bridge
+                const commands = `pip install aiohttp ; Invoke-WebRequest -Uri https://raw.githubusercontent.com/GlassOnTin/bluep/main/bluep_mcp_stdio_bridge.py -OutFile bluep_mcp_stdio_bridge.py ; Write-Host "Start bridge in Terminal 1:" ; Write-Host 'python bluep_mcp_stdio_bridge.py --port 5000 --command "npx -y @tiberriver256/mcp-server-azure-devops"' ; Write-Host "" ; Write-Host "Then in Terminal 2:" ; Write-Host "python bluep_mcp_reverse_proxy.py register azure-devops --server https://${window.location.host} --token '${sessionToken}' --local-port 5000 --ws-token"`;
+                copyToClipboard(commands);
+            } else {
+                const commands = `pip install aiohttp && wget https://raw.githubusercontent.com/GlassOnTin/bluep/main/bluep_mcp_stdio_bridge.py && echo "Start bridge in Terminal 1:" && echo 'python bluep_mcp_stdio_bridge.py --port 5000 --command "npx -y @tiberriver256/mcp-server-azure-devops"' && echo "" && echo "Then in Terminal 2:" && echo "python bluep_mcp_reverse_proxy.py register azure-devops --server https://${window.location.host} --token '${sessionToken}' --local-port 5000 --ws-token"`;
                 copyToClipboard(commands);
             }
         }
