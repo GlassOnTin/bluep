@@ -1,12 +1,12 @@
 #!/usr/bin/env python3
 """
-Bluep MCP Client - Standalone single-file version
+Bluep MCP Client with Authentication - Standalone single-file version
+
+This version handles authentication by first authenticating via the WebSocket
+and then maintaining the connection.
 
 Usage:
-    python bluep_mcp_standalone.py --help
-    python bluep_mcp_standalone.py proxy azure-devops --server wss://localhost:8500/ws --token YOUR_TOKEN
-
-This is a single-file version of the bluep MCP client that can be easily copied and run anywhere.
+    python bluep_mcp_standalone_auth.py proxy azure-devops --server wss://localhost:8500/ws --token YOUR_WEBSOCKET_TOKEN --port 4000
 """
 
 import asyncio
@@ -37,50 +37,22 @@ logger = logging.getLogger(__name__)
 class MCPClientProxy:
     """Proxy that exposes remote MCP services on local ports."""
     
-    def __init__(self, bluep_ws_url: str, session_token: str, verify_ssl: bool = False):
+    def __init__(self, bluep_ws_url: str, websocket_token: str, verify_ssl: bool = False):
         self.bluep_ws_url = bluep_ws_url
-        self.session_token = session_token
+        self.websocket_token = websocket_token
         self.verify_ssl = verify_ssl
         self.ws_connection = None
         self.pending_requests = {}
         self.request_counter = 0
+        self.authenticated = False
         
     async def connect(self):
         """Connect to bluep WebSocket server."""
-        headers = {
-            "Cookie": f"bluep_session={self.session_token}",
-            "Origin": self.bluep_ws_url.replace("wss://", "https://").replace("ws://", "http://").rsplit("/", 1)[0]
-        }
-        
         # Handle SSL for wss:// URLs
         connect_kwargs = {
             "uri": self.bluep_ws_url,
         }
         
-        # Add headers if supported (websockets >= 10.0)
-        try:
-            # Try with extra_headers first (newer versions)
-            if self.bluep_ws_url.startswith("wss://"):
-                if not self.verify_ssl:
-                    ssl_context = ssl.create_default_context()
-                    ssl_context.check_hostname = False
-                    ssl_context.verify_mode = ssl.CERT_NONE
-                else:
-                    ssl_context = True
-                connect_kwargs["ssl"] = ssl_context
-            
-            connect_kwargs["extra_headers"] = headers
-            self.ws_connection = await websockets.connect(**connect_kwargs)
-            logger.info(f"Connected to bluep server with headers")
-            asyncio.create_task(self._handle_messages())
-            return
-        except TypeError as e:
-            if "extra_headers" in str(e):
-                logger.warning("Your websockets version doesn't support extra_headers. Using authentication message instead.")
-            else:
-                raise
-        
-        # Fallback: Connect without headers and authenticate via message
         if self.bluep_ws_url.startswith("wss://"):
             if not self.verify_ssl:
                 ssl_context = ssl.create_default_context()
@@ -88,20 +60,27 @@ class MCPClientProxy:
                 ssl_context.verify_mode = ssl.CERT_NONE
             else:
                 ssl_context = True  # Use default SSL verification
-            self.ws_connection = await websockets.connect(self.bluep_ws_url, ssl=ssl_context)
-        else:
-            self.ws_connection = await websockets.connect(self.bluep_ws_url)
+            connect_kwargs["ssl"] = ssl_context
             
-        logger.info(f"Connected to bluep server, authenticating...")
+        self.ws_connection = await websockets.connect(**connect_kwargs)
         
-        # Send authentication via WebSocket message instead
-        auth_msg = {
+        # Send authentication message immediately after connecting
+        auth_message = {
             "type": "auth",
-            "token": self.session_token
+            "token": self.websocket_token
         }
-        await self.ws_connection.send(json.dumps(auth_msg))
+        await self.ws_connection.send(json.dumps(auth_message))
         
+        # Start message handler
         asyncio.create_task(self._handle_messages())
+        
+        # Wait briefly for authentication
+        await asyncio.sleep(0.5)
+        
+        if not self.authenticated:
+            logger.warning("Authentication may have failed. Continuing anyway...")
+        
+        logger.info(f"Connected to bluep server")
         
     async def _handle_messages(self):
         """Handle incoming WebSocket messages."""
@@ -109,22 +88,30 @@ class MCPClientProxy:
             async for message in self.ws_connection:
                 try:
                     data = json.loads(message)
-                    msg_type = data.get("type")
                     
-                    if msg_type == "ping":
-                        # Respond to ping with pong
-                        await self.ws_connection.send(json.dumps({"type": "pong"}))
-                        logger.debug("Received ping, sent pong")
-                    elif msg_type == "auth_success":
+                    # Handle authentication response
+                    if data.get("type") == "auth_success":
+                        self.authenticated = True
                         logger.info("Successfully authenticated with bluep server")
-                    elif msg_type == "error":
-                        logger.error(f"Server error: {data.get('error', 'Unknown error')}")
-                    elif msg_type == "mcp-response":
+                    
+                    # Handle ping messages
+                    elif data.get("type") == "ping":
+                        pong = {"type": "pong"}
+                        await self.ws_connection.send(json.dumps(pong))
+                        logger.debug("Received ping, sent pong")
+                    
+                    # Handle MCP responses
+                    elif data.get("type") == "mcp-response":
                         request_id = data.get("mcpPayload", {}).get("id")
                         if request_id in self.pending_requests:
                             future = self.pending_requests.pop(request_id)
                             if not future.cancelled():
                                 future.set_result(data["mcpPayload"])
+                    
+                    # Handle errors
+                    elif data.get("type") == "error":
+                        logger.error(f"Server error: {data.get('error', 'Unknown error')}")
+                        
                 except Exception as e:
                     logger.error(f"Error handling message: {e}")
         except websockets.exceptions.ConnectionClosed:
@@ -198,7 +185,7 @@ async def main():
     proxy_parser.add_argument('--server', '-s', default='wss://localhost:8500/ws',
                             help='Bluep WebSocket URL')
     proxy_parser.add_argument('--token', '-t', required=True,
-                            help='Session token')
+                            help='WebSocket token (from bluep editor page)')
     proxy_parser.add_argument('--port', '-p', type=int, default=4000,
                             help='Local port')
     proxy_parser.add_argument('--verify-ssl', action='store_true',
@@ -221,7 +208,12 @@ async def main():
             print(f"Proxying MCP service '{args.service}' on port {args.port}")
             print("Press Ctrl+C to stop")
             
-            await asyncio.Event().wait()
+            # Keep alive loop
+            while True:
+                await asyncio.sleep(60)
+                if proxy.ws_connection.closed:
+                    print("Connection lost. Exiting...")
+                    break
             
         except KeyboardInterrupt:
             print("\nShutting down...")
