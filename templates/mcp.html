@@ -153,6 +153,17 @@
             position: relative;
         }
         
+        .code-block pre {
+            margin: 0;
+            padding: 0;
+            background: transparent;
+            color: inherit;
+            font-family: inherit;
+            font-size: inherit;
+            white-space: pre-wrap;
+            word-wrap: break-word;
+        }
+        
         .copy-btn {
             position: absolute;
             top: 5px;
@@ -421,16 +432,16 @@
                             <p style="font-size: 13px; color: #8a8; margin: 5px 0;">✓ Run MCP services behind firewalls</p>
                             <p style="font-size: 13px; color: #8a8; margin: 5px 0;">✓ Perfect for services requiring local authentication</p>
                             <div class="code-block">
-                                ${isWindows() ?
-                                    `# First, run your MCP service locally (e.g., on port 5000)
+                                <pre>${isWindows() ?
+`# First, run your MCP service locally (e.g., on port 5000)
 # Then download and run the reverse proxy:
 Invoke-WebRequest -Uri https://raw.githubusercontent.com/GlassOnTin/bluep/main/bluep_mcp_reverse_proxy.py -OutFile bluep_mcp_reverse_proxy.py
 python bluep_mcp_reverse_proxy.py register SERVICE_NAME --server https://${window.location.host} --token ${sessionToken} --local-port 5000` :
-                                    `# First, run your MCP service locally (e.g., on port 5000)
+`# First, run your MCP service locally (e.g., on port 5000)
 # Then download and run the reverse proxy:
 wget https://raw.githubusercontent.com/GlassOnTin/bluep/main/bluep_mcp_reverse_proxy.py
 python bluep_mcp_reverse_proxy.py register SERVICE_NAME --server https://${window.location.host} --token ${sessionToken} --local-port 5000`
-                                }
+                                }</pre>
                                 <button class="copy-btn" onclick="copyReverseProxyCommands()">Copy ${isWindows() ? '(PowerShell)' : '(Bash)'}</button>
                             </div>
                             
@@ -438,13 +449,13 @@ python bluep_mcp_reverse_proxy.py register SERVICE_NAME --server https://${windo
                             <p style="font-size: 14px; color: #aaa; margin: 10px 0;">For accessing MCP services already running on this bluep server</p>
                             <p style="font-size: 13px; color: #8a8; margin: 5px 0;">✓ Access server-hosted MCP services from your local machine</p>
                             <div class="code-block">
-                                ${isWindows() ?
-                                    `# PowerShell:
+                                <pre>${isWindows() ?
+`# PowerShell:
 Invoke-WebRequest -Uri https://raw.githubusercontent.com/GlassOnTin/bluep/main/bluep_mcp_aiohttp.py -OutFile bluep_mcp_aiohttp.py
 python bluep_mcp_aiohttp.py proxy SERVICE_NAME --server https://${window.location.host} --token ${sessionToken} --port 4000` :
-                                    `wget https://raw.githubusercontent.com/GlassOnTin/bluep/main/bluep_mcp_aiohttp.py
+`wget https://raw.githubusercontent.com/GlassOnTin/bluep/main/bluep_mcp_aiohttp.py
 python bluep_mcp_aiohttp.py proxy SERVICE_NAME --server https://${window.location.host} --token ${sessionToken} --port 4000`
-                                }
+                                }</pre>
                                 <button class="copy-btn" onclick="copyStandaloneCommands()">Copy ${isWindows() ? '(PowerShell)' : '(Bash)'}</button>
                             </div>
                             
@@ -467,14 +478,14 @@ bluep-mcp proxy SERVICE_NAME --server wss://${window.location.host}/ws --port 40
                             <p style="font-size: 14px; color: #aaa;">For external services (Option 1), they're accessible directly through bluep - no local proxy needed!</p>
                             <p style="font-size: 14px; color: #aaa;">For remote services (Option 2), configure your MCP client to use the local proxy:</p>
                             <div class="code-block">
-{
+                                <pre>{
   "mcpServers": {
     "SERVICE_NAME": {
       "command": "node",
       "args": ["/path/to/mcp-client.js", "http://localhost:4000"]
     }
   }
-}
+}</pre>
                                 <button class="copy-btn" onclick="copyClaudeConfig()">Copy</button>
                             </div>
                         </div>
